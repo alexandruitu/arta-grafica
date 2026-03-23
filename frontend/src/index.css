@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-height: 100svh;
+}
+
+/* Frappe Gantt overrides */
+.gantt-container .bar-planned .bar-progress,
+.gantt-container .bar-planned .bar { fill: #3b82f6 !important; }
+.gantt-container .bar-late .bar-progress,
+.gantt-container .bar-late .bar { fill: #dc2626 !important; }
+.gantt-container .bar-frozen .bar-progress,
+.gantt-container .bar-frozen .bar { fill: #6366f1 !important; }
