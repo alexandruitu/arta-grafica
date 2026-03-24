@@ -8,7 +8,7 @@ Flow:
 2. Exclude Status_cda = STOP
 3. For each order, get dispatch operations sorted by rank
 4. For each operation, check:
-   a. BT exists on the order
+   a. BT (Bun de Tipar) exists on the order
    b. Lower-rank operations are not "open" (completed or planned is OK)
       - If predecessor is "planned", this op starts after predecessor's planned end
    c. Materials are available (SoldActual - already reserved > 0)
@@ -45,7 +45,7 @@ def get_stadiu_priority(stadiu: str | None) -> int:
 
 
 def has_valid_bt(comanda: Comanda) -> bool:
-    """Check if BT exists (at least one BT field is not empty/invalid)."""
+    """Check if Bun de Tipar exists (at least one BT field is not empty/invalid)."""
     for bt in [comanda.bt1, comanda.bt2, comanda.bt3, comanda.bt4]:
         if bt and bt.strip() and bt.strip() != INVALID_BT_DATE:
             return True
@@ -261,7 +261,7 @@ def run_planning(db: Session) -> dict:
                     wo=disp.wo, op=disp.op, cl=disp.cl,
                     resursa_id=None, resursa_nume=None,
                     data_start=None, data_end=None, durata_ore=remaining,
-                    status="no_bt", motiv="Comanda nu are BT valid",
+                    status="no_bt", motiv="Comanda nu are Bun de Tipar valid",
                 ))
                 stats["no_bt"] += 1
                 update_rank(rank, "open")

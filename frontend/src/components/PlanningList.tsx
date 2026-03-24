@@ -119,7 +119,7 @@ export default function PlanningList() {
           >
             <p className="text-xs text-slate-500 mb-0.5">Fara BT</p>
             <p className="text-2xl font-bold text-orange-600">{stats.no_bt}</p>
-            <p className="text-xs text-slate-400">bon de transfer</p>
+            <p className="text-xs text-slate-400">bun de tipar</p>
           </button>
           <button
             onClick={() => setSelectedStatus(selectedStatus === 'blocked_by_rank' ? '' : 'blocked_by_rank')}
