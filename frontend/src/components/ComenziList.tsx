@@ -1,28 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { api } from '../api/client';
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 
 export default function ComenziList() {
   const [comenzi, setComenzi] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [stadiuFilter, setStadiuFilter] = useState('');
   const [expandedCP, setExpandedCP] = useState<number | null>(null);
   const [operatii, setOperatii] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadComenzi = async () => {
     setLoading(true);
-    const params: Record<string, string> = { limit: '200' };
+    // Load enough rows to compute accurate stats (up to 2000)
+    const params: Record<string, string> = { limit: '2000' };
     if (search) params.search = search;
     if (statusFilter) params.status = statusFilter;
+    if (stadiuFilter) params.stadiu = stadiuFilter;
     try {
       const data = await api.getComenzi(params);
       setComenzi(data);
+      setTotalCount(null); // reset — stats come from the loaded array
     } catch { setComenzi([]); }
     setLoading(false);
   };
 
-  useEffect(() => { loadComenzi(); }, [statusFilter]);
+  useEffect(() => { loadComenzi(); }, [statusFilter, stadiuFilter]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,8 +56,65 @@ export default function ComenziList() {
     return 'bg-slate-100 text-slate-600';
   };
 
+  // Compute stats live from the loaded (filtered) array
+  const liveStats = useMemo(() => ({
+    total:   comenzi.length,
+    stadiu06: comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
+    liber:   comenzi.filter(c => c.status_cda === 'LIBER').length,
+    stop:    comenzi.filter(c => c.status_cda === 'STOP').length,
+  }), [comenzi]);
+
+  const hasFilter = !!(search || statusFilter || stadiuFilter);
+
+  const overviewCards = [
+    {
+      label: hasFilter ? 'Rezultate filtrate' : 'Total comenzi',
+      value: liveStats.total,
+      color: 'bg-slate-100 text-slate-700 border-slate-200',
+      active: !statusFilter && !stadiuFilter,
+      onClick: () => { setStatusFilter(''); setStadiuFilter(''); },
+    },
+    {
+      label: '06 – În producție',
+      value: liveStats.stadiu06,
+      color: 'bg-green-50 text-green-700 border-green-200',
+      active: stadiuFilter === '06 - In productie',
+      onClick: () => { setStadiuFilter('06 - In productie'); setStatusFilter(''); },
+    },
+    {
+      label: 'LIBER',
+      value: liveStats.liber,
+      color: 'bg-blue-50 text-blue-700 border-blue-200',
+      active: statusFilter === 'LIBER',
+      onClick: () => { setStatusFilter('LIBER'); setStadiuFilter(''); },
+    },
+    {
+      label: 'STOP',
+      value: liveStats.stop,
+      color: 'bg-red-50 text-red-700 border-red-200',
+      active: statusFilter === 'STOP',
+      onClick: () => { setStatusFilter('STOP'); setStadiuFilter(''); },
+    },
+  ];
+
   return (
     <div className="space-y-4">
+      {/* Overview cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {overviewCards.map(card => (
+          <button
+            key={card.label}
+            onClick={card.onClick}
+            className={`flex flex-col items-start px-4 py-3 rounded-xl border transition-all text-left
+              ${card.color}
+              ${card.active ? 'ring-2 ring-offset-1 ring-current shadow-sm' : 'hover:shadow-sm hover:brightness-95'}`}
+          >
+            <span className="text-2xl font-bold leading-tight">{card.value}</span>
+            <span className="text-xs font-medium mt-0.5 opacity-80">{card.label}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Search & filters */}
       <div className="flex gap-3 items-center">
         <form onSubmit={handleSearch} className="flex gap-2 flex-1">
@@ -72,13 +134,21 @@ export default function ComenziList() {
         </form>
         <select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => { setStatusFilter(e.target.value); setStadiuFilter(''); }}
           className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm"
         >
           <option value="">Toate statusurile</option>
           <option value="LIBER">LIBER</option>
           <option value="STOP">STOP</option>
         </select>
+        {(statusFilter || stadiuFilter) && (
+          <button
+            onClick={() => { setStatusFilter(''); setStadiuFilter(''); }}
+            className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 underline"
+          >
+            Sterge filtru
+          </button>
+        )}
       </div>
 
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}

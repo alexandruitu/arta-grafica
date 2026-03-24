@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import Dashboard from './components/Dashboard';
 import GanttView from './components/GanttView';
+import BoardView from './components/BoardView';
 import ComenziList from './components/ComenziList';
 import PlanningList from './components/PlanningList';
 import StocView from './components/StocView';
-import { LayoutDashboard, GanttChart, Package, ListChecks, Boxes } from 'lucide-react';
+import { LayoutDashboard, GanttChart, LayoutGrid, Package, ListChecks, Boxes } from 'lucide-react';
 import './index.css';
 
-type Tab = 'dashboard' | 'gantt' | 'comenzi' | 'planificare' | 'stoc';
+type Tab = 'dashboard' | 'gantt' | 'board' | 'comenzi' | 'planificare' | 'stoc';
 
 const tabs: { id: Tab; label: string; icon: any }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'gantt', label: 'Gantt', icon: GanttChart },
+  { id: 'board', label: 'Board Mașini', icon: LayoutGrid },
   { id: 'comenzi', label: 'Comenzi', icon: Package },
   { id: 'planificare', label: 'Planificare', icon: ListChecks },
   { id: 'stoc', label: 'Stoc Materiale', icon: Boxes },
@@ -60,13 +62,14 @@ export default function App() {
           })}
         </nav>
 
-        {/* Main content */}
-        <main className="flex-1 p-6">
+        {/* Main content — min-w-0 prevents flex item from overflowing past parent */}
+        <main className="flex-1 min-w-0 p-6">
           <h2 className="text-xl font-semibold text-slate-800 mb-4">
             {tabs.find(t => t.id === activeTab)?.label}
           </h2>
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'gantt' && <GanttView />}
+          {activeTab === 'board' && <BoardView />}
           {activeTab === 'comenzi' && <ComenziList />}
           {activeTab === 'planificare' && <PlanningList />}
           {activeTab === 'stoc' && <StocView />}

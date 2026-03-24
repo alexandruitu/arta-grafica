@@ -40,6 +40,7 @@ export const api = {
 
   // Planificare
   getLatestPlanning: () => request<any>('/planificare/latest'),
+  getBoardData: () => request<any>('/planificare/board'),
   getGanttData: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<any[]>(`/planificare/gantt${qs}`);

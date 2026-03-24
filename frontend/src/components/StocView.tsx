@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { Search } from 'lucide-react';
 
@@ -23,6 +23,22 @@ export default function StocView() {
     loadStoc();
   };
 
+  const stats = useMemo(() => ({
+    total:      stoc.length,
+    disponibil: stoc.filter(s => s.disponibil > 0).length,
+    epuizat:    stoc.filter(s => s.disponibil === 0).length,
+    deficit:    stoc.filter(s => s.disponibil < 0).length,
+    totalRezervat: stoc.reduce((sum, s) => sum + (s.total_rezervat || 0), 0),
+  }), [stoc]);
+
+  const [filterStatus, setFilterStatus] = useState<'deficit' | 'epuizat' | ''>('');
+
+  const visibleStoc = useMemo(() => {
+    if (filterStatus === 'deficit') return stoc.filter(s => s.disponibil < 0);
+    if (filterStatus === 'epuizat') return stoc.filter(s => s.disponibil === 0);
+    return stoc;
+  }, [stoc, filterStatus]);
+
   return (
     <div className="space-y-4">
       <form onSubmit={handleSearch} className="flex gap-2">
@@ -41,6 +57,38 @@ export default function StocView() {
         </button>
       </form>
 
+      {/* Stats cards */}
+      {stoc.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-500 mb-0.5">Total articole</p>
+            <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
+            <p className="text-xs text-slate-400">{stats.totalRezervat.toLocaleString('ro-RO')} rezervat</p>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-500 mb-0.5">Disponibil</p>
+            <p className="text-2xl font-bold text-green-600">{stats.disponibil}</p>
+            <p className="text-xs text-slate-400">stoc pozitiv</p>
+          </div>
+          <button
+            onClick={() => setFilterStatus(filterStatus === 'epuizat' ? '' : 'epuizat')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${filterStatus === 'epuizat' ? 'bg-amber-100 border-amber-400' : 'bg-white border-slate-200 hover:bg-amber-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Epuizat</p>
+            <p className="text-2xl font-bold text-amber-600">{stats.epuizat}</p>
+            <p className="text-xs text-slate-400">sold zero</p>
+          </button>
+          <button
+            onClick={() => setFilterStatus(filterStatus === 'deficit' ? '' : 'deficit')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${filterStatus === 'deficit' ? 'bg-red-100 border-red-400' : 'bg-white border-slate-200 hover:bg-red-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Deficit</p>
+            <p className="text-2xl font-bold text-red-600">{stats.deficit}</p>
+            <p className="text-xs text-slate-400">disponibil negativ</p>
+          </button>
+        </div>
+      )}
+
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -55,7 +103,7 @@ export default function StocView() {
             </tr>
           </thead>
           <tbody>
-            {stoc.map((s, i) => (
+            {visibleStoc.map((s, i) => (
               <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-3 py-2 font-mono text-xs">{s.articol}</td>
                 <td className="px-3 py-2 text-right">{s.sold_actual?.toLocaleString('ro-RO')}</td>

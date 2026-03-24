@@ -18,7 +18,8 @@ interface GanttTask {
 }
 
 export default function GanttView() {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);   // scrollable outer div
+  const containerRef = useRef<HTMLDivElement>(null); // frappe-gantt target
   const ganttRef = useRef<any>(null);
   const [tasks, setTasks] = useState<GanttTask[]>([]);
   const [centreLucru, setCentreLucru] = useState<any[]>([]);
@@ -36,7 +37,6 @@ export default function GanttView() {
     const params: Record<string, string> = {};
     if (selectedCL) params.cl = selectedCL;
     if (searchWO) params.wo = searchWO;
-
     try {
       const data = await api.getGanttData(params);
       setTasks(data);
@@ -49,7 +49,7 @@ export default function GanttView() {
   useEffect(() => { loadGantt(); }, [selectedCL, searchWO]);
 
   useEffect(() => {
-    if (!containerRef.current || tasks.length === 0) return;
+    if (!containerRef.current || !wrapperRef.current || tasks.length === 0) return;
 
     containerRef.current.innerHTML = '';
 
@@ -70,7 +70,6 @@ export default function GanttView() {
         bar_height: 24,
         bar_corner_radius: 3,
         padding: 14,
-        scroll_to: 'today',
         on_click: (task: any) => {
           const t = tasks.find(x => x.id === task.id);
           if (t) {
@@ -78,15 +77,43 @@ export default function GanttView() {
           }
         },
       });
-      // Scroll to today after render
+
+      const wrapper = wrapperRef.current;
+
+      // Intercept wheel events: both axes scroll the gantt wrapper, not the page
+      const handleWheel = (e: WheelEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        wrapper.scrollTop += e.deltaY;
+        wrapper.scrollLeft += e.deltaX;
+      };
+      wrapper.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+
+      // Scroll wrapper to today after render
       setTimeout(() => {
-        const todayMarker = containerRef.current?.querySelector('.current-highlight');
-        const gc = containerRef.current?.querySelector('.gantt-container') || containerRef.current;
-        if (todayMarker && gc) {
-          const left = parseInt(getComputedStyle(todayMarker).left) || 0;
-          gc.scrollLeft = Math.max(0, left - 200);
+        const svgEl = containerRef.current?.querySelector('svg.gantt') as SVGElement | null;
+        if (!svgEl || !wrapper) return;
+
+        // Find today marker (rect or g element) and scroll to it
+        const todayEl = svgEl.querySelector('.current-highlight') as SVGElement | null;
+        if (todayEl) {
+          const x = parseFloat(todayEl.getAttribute('x') || '0') ||
+                    (() => {
+                      const m = (todayEl.getAttribute('transform') || '').match(/translate\(([^,)]+)/);
+                      return m ? parseFloat(m[1]) : 0;
+                    })();
+          if (x > 0) {
+            wrapper.scrollLeft = Math.max(0, x - wrapper.clientWidth / 2);
+            return;
+          }
         }
-      }, 500);
+        // Fallback: scroll to first bar
+        const firstBar = svgEl.querySelector('.bar-wrapper rect.bar') as SVGRectElement | null;
+        if (firstBar) {
+          wrapper.scrollLeft = Math.max(0, parseFloat(firstBar.getAttribute('x') || '0') - 100);
+        }
+      }, 300);
+
     } catch (e) {
       console.error('Gantt render error:', e);
     }
@@ -137,14 +164,6 @@ export default function GanttView() {
         </button>
       </div>
 
-      {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
-
-      {tasks.length === 0 && !loading && (
-        <div className="bg-white rounded-lg shadow-sm p-8 text-center text-slate-500">
-          Nu exista operatii planificate. Ruleaza planificarea din Dashboard.
-        </div>
-      )}
-
       {/* Legend */}
       <div className="flex gap-4 text-sm">
         <span className="flex items-center gap-1">
@@ -158,9 +177,21 @@ export default function GanttView() {
         </span>
       </div>
 
-      {/* Gantt chart */}
-      <div className="bg-white rounded-lg shadow-sm p-2">
-        <div ref={containerRef} style={{ height: '500px' }} />
+      {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
+
+      {tasks.length === 0 && !loading && (
+        <div className="bg-white rounded-lg shadow-sm p-8 text-center text-slate-500">
+          Nu exista operatii planificate. Ruleaza planificarea din Dashboard.
+        </div>
+      )}
+
+      {/* Gantt chart: wrapperRef scrolls in both directions, containerRef holds the SVG */}
+      <div
+        ref={wrapperRef}
+        className="bg-white rounded-lg shadow-sm p-2 overflow-auto"
+        style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}
+      >
+        <div ref={containerRef} style={{ minWidth: '100%' }} />
       </div>
     </div>
   );

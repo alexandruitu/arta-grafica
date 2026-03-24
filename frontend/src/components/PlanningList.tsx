@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 
 export default function PlanningList() {
@@ -25,6 +25,20 @@ export default function PlanningList() {
   };
 
   useEffect(() => { loadResults(); }, [selectedCL, selectedStatus]);
+
+  const stats = useMemo(() => {
+    const planned    = results.filter(r => r.status === 'planned');
+    const oreTotal   = planned.reduce((s, r) => s + (r.durata_ore || 0), 0);
+    return {
+      total:        results.length,
+      planned:      planned.length,
+      no_material:  results.filter(r => r.status === 'no_material').length,
+      blocked:      results.filter(r => r.status === 'blocked_by_rank').length,
+      no_bt:        results.filter(r => r.status === 'no_bt').length,
+      no_resource:  results.filter(r => r.status === 'no_resource').length,
+      ore:          oreTotal,
+    };
+  }, [results]);
 
   const statusBadge = (status: string) => {
     const styles: Record<string, string> = {
@@ -74,6 +88,57 @@ export default function PlanningList() {
           <option value="no_bt">Fara BT</option>
         </select>
       </div>
+
+      {/* Stats cards — reflect current filter */}
+      {results.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-500 mb-0.5">Total afișate</p>
+            <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
+            <p className="text-xs text-slate-400">operații</p>
+          </div>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'planned' ? '' : 'planned')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'planned' ? 'bg-green-100 border-green-400' : 'bg-white border-slate-200 hover:bg-green-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Planificate</p>
+            <p className="text-2xl font-bold text-green-700">{stats.planned}</p>
+            <p className="text-xs text-slate-400">{stats.ore.toFixed(0)} ore totale</p>
+          </button>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'no_material' ? '' : 'no_material')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_material' ? 'bg-red-100 border-red-400' : 'bg-white border-slate-200 hover:bg-red-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Fara Material</p>
+            <p className="text-2xl font-bold text-red-600">{stats.no_material}</p>
+            <p className="text-xs text-slate-400">stoc insuficient</p>
+          </button>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'no_bt' ? '' : 'no_bt')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_bt' ? 'bg-orange-100 border-orange-400' : 'bg-white border-slate-200 hover:bg-orange-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Fara BT</p>
+            <p className="text-2xl font-bold text-orange-600">{stats.no_bt}</p>
+            <p className="text-xs text-slate-400">bon de transfer</p>
+          </button>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'blocked_by_rank' ? '' : 'blocked_by_rank')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'blocked_by_rank' ? 'bg-amber-100 border-amber-400' : 'bg-white border-slate-200 hover:bg-amber-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Blocate Rank</p>
+            <p className="text-2xl font-bold text-amber-600">{stats.blocked}</p>
+            <p className="text-xs text-slate-400">asteapta predec.</p>
+          </button>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'no_resource' ? '' : 'no_resource')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_resource' ? 'bg-slate-200 border-slate-400' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Fara Resursa</p>
+            <p className="text-2xl font-bold text-slate-600">{stats.no_resource}</p>
+            <p className="text-xs text-slate-400">nemapate</p>
+          </button>
+        </div>
+      )}
 
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 from datetime import datetime, timedelta
+from collections import defaultdict
 from fastapi import FastAPI, Depends, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -216,6 +217,117 @@ def get_gantt_data(
     return tasks
 
 
+@app.get("/api/planificare/board")
+def get_board_data(db: Session = Depends(get_db)):
+    """Resource-centric board view (rows=machines, columns=hours).
+    Returns vis-timeline compatible groups + items with hour-level precision."""
+    sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+    if not sesiune:
+        return {"groups": [], "items": []}
+
+    results = (
+        db.query(PlanificareRezultat)
+        .filter(PlanificareRezultat.sesiune_id == sesiune.id)
+        .filter(PlanificareRezultat.status == "planned")
+        .all()
+    )
+
+    # Shift schedules per resource per day
+    program_map: dict = defaultdict(dict)  # {resursa_id: {date: schimburi_str}}
+    for p in db.query(ProgramResursa).all():
+        program_map[p.resursa_id][p.data] = p.schimburi or ""
+
+    # Cache comenzi
+    comanda_cache: dict = {}
+    for r in results:
+        if r.wo not in comanda_cache:
+            comanda_cache[r.wo] = db.query(Comanda).filter(Comanda.cp == r.wo).first()
+
+    # Groups: only resources that have planned operations
+    resurse_ids = {r.resursa_id for r in results if r.resursa_id}
+    resurse_map = {r.id: r for r in db.query(Resursa).filter(Resursa.id.in_(resurse_ids)).all()}
+
+    groups = []
+    for r in sorted(resurse_map.values(), key=lambda x: (x.cl, x.resursa)):
+        groups.append({"id": str(r.id), "content": r.resursa, "cl": r.cl})
+
+    # Group planned ops by (resursa_id, day) to assign sequential hour-level times
+    ops_by_res_day: dict = defaultdict(list)
+    for r in results:
+        if r.resursa_id and r.data_start:
+            ops_by_res_day[(r.resursa_id, r.data_start.date())].append(r)
+
+    # Color palette by CL (center of work)
+    cl_colors = [
+        "#3b82f6","#06b6d4","#8b5cf6","#f59e0b","#10b981",
+        "#f97316","#ec4899","#6366f1","#14b8a6","#84cc16",
+    ]
+    cl_color_map: dict = {}
+
+    def get_cl_color(cl: str) -> str:
+        if cl not in cl_color_map:
+            cl_color_map[cl] = cl_colors[len(cl_color_map) % len(cl_colors)]
+        return cl_color_map[cl]
+
+    items = []
+    item_id = 1
+
+    for (res_id, day), ops in sorted(ops_by_res_day.items()):
+        # Determine shift start for this resource on this day
+        schimburi = program_map.get(res_id, {}).get(day, "")
+        shift_start_hour = 6  # default
+        if schimburi:
+            try:
+                shift_start_hour = int(schimburi.split(";")[0].split("-")[0])
+            except Exception:
+                pass
+
+        current_dt = datetime.combine(day, datetime.min.time()) + timedelta(hours=shift_start_hour)
+        ops.sort(key=lambda o: o.id)  # preserve planner insertion order
+
+        for op in ops:
+            comanda = comanda_cache.get(op.wo)
+            delivery = None
+            if comanda:
+                delivery = comanda.data_actualizata_livrare or comanda.dt_livr_prod
+
+            start_dt = current_dt
+            end_dt = current_dt + timedelta(hours=max(op.durata_ore, 0.25))  # min 15min bar
+            current_dt = end_dt
+
+            is_late = bool(delivery and start_dt.date() > delivery)
+            color = "#dc2626" if is_late else get_cl_color(op.cl or "")
+
+            tooltip = (
+                f"<b>WO: {op.wo}</b><br>"
+                f"OP: {op.op} &nbsp;|&nbsp; CL: {op.cl}<br>"
+                f"Resursa: {op.resursa_nume or '-'}<br>"
+                f"Durata: {op.durata_ore:.1f} h<br>"
+                f"Client: {comanda.client if comanda else '-'}<br>"
+                f"Articol: {(comanda.articol or '')[:60] if comanda else '-'}<br>"
+                f"Data livrare: {delivery or '-'}"
+                + ("<br><span style='color:#dc2626;font-weight:bold'>⚠ ÎNTÂRZIAT</span>" if is_late else "")
+            )
+
+            items.append({
+                "id": item_id,
+                "group": str(res_id),
+                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                "content": f"WO:{op.wo} OP:{op.op}",
+                "title": tooltip,
+                "style": f"background-color:{color};border-color:{color};color:#fff;",
+                "wo": op.wo,
+                "op": op.op,
+                "cl": op.cl,
+                "durata_ore": op.durata_ore,
+                "late": is_late,
+            })
+            item_id += 1
+
+    return {"groups": groups, "items": items}
+
+
 @app.get("/api/planificare/operatii", response_model=List[PlanificareOut])
 def get_planning_results(
     cl: Optional[str] = Query(None),
@@ -246,6 +358,9 @@ def get_stoc(
     limit: int = Query(50),
     db: Session = Depends(get_db),
 ):
+    # cantitate in Deficit table is stored as negative for B-type reservations.
+    # disponibil = sold_actual + sum(cantitate)  ← correct (adding negatives = subtracting)
+    # NOT sold_actual - sum(cantitate)           ← wrong (double negation inflates stock)
     q = db.query(
         Deficit.articol,
         func.max(Deficit.sold_actual).label("sold_actual"),
@@ -261,7 +376,7 @@ def get_stoc(
             articol=r[0],
             sold_actual=r[1] or 0,
             total_rezervat=r[2] or 0,
-            disponibil=(r[1] or 0) - (r[2] or 0),
+            disponibil=(r[1] or 0) + (r[2] or 0),
         )
         for r in results
     ]

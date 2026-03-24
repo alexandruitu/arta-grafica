@@ -17,6 +17,86 @@ body {
   min-height: 100svh;
 }
 
+/* frappe-gantt sets SVG width:100% which collapses when container is constrained.
+   overflow:visible lets bars render beyond the SVG viewport; our wrapper div
+   with overflow-x:auto handles horizontal scrolling instead. */
+.gantt-container {
+  overflow: visible !important;
+}
+svg.gantt {
+  overflow: visible !important;
+}
+
+/* ── vis-timeline Board overrides ────────────────────────────────────────── */
+/* Group label: show CL badge + machine name */
+.board-group-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 4px;
+}
+.board-cl {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.board-res {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.board-bar-text {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+/* vis-timeline item overrides */
+.vis-item {
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  border-width: 0 !important;
+}
+.vis-item.vis-selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #3b82f6 !important;
+}
+/* Tooltip */
+.vis-tooltip {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+  padding: 8px 12px !important;
+  max-width: 280px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+}
+/* Current time line */
+.vis-current-time {
+  background-color: #ef4444 !important;
+  width: 2px !important;
+}
+/* Group labels panel — fixed row height, no stretch */
+.vis-labelset .vis-label {
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+  height: 54px !important;
+  line-height: 54px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+/* Matching row height in the content panel */
+.vis-foreground .vis-group,
+.vis-background .vis-group {
+  height: 54px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
 /* Frappe Gantt overrides */
 .gantt-container .bar-planned .bar-progress,
 .gantt-container .bar-planned .bar { fill: #3b82f6 !important; }
