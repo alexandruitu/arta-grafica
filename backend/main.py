@@ -216,6 +216,8 @@ def get_gantt_data(
             status=r.status,
         ))
 
+    # Sort by WO then by planned start date so rank order is visible in Gantt rows
+    tasks.sort(key=lambda t: (t.wo, t.start))
     return tasks
 
 
