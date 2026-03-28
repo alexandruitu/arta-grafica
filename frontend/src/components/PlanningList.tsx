@@ -90,7 +90,7 @@ export default function PlanningList() {
         </select>
       </div>
 
-      {/* AI Assistant — sus, imediat dupa filtre */}
+      {/* AI Assistant — sus */}
       <AIAssistant tab="planificare" />
 
       {/* Stats cards — reflect current filter */}
