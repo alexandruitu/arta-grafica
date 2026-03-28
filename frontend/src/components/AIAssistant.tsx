@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Bot, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { getToken } from '../api/client';
 
 const QUESTIONS: Record<string, { id: string; label: string }[]> = {
   dashboard: [
@@ -44,8 +45,10 @@ export default function AIAssistant({ tab }: Props) {
     abortRef.current = controller;
 
     try {
+      const token = getToken();
       const res = await fetch(`/api/ai/analyze?question_id=${encodeURIComponent(questionId)}`, {
         signal: controller.signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
