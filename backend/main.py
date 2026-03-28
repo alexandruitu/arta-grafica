@@ -798,7 +798,10 @@ if os.path.isdir(_DIST):
         file_path = os.path.join(_DIST, full_path)
         if os.path.isfile(file_path):
             return FileResponse(file_path)
-        return FileResponse(os.path.join(_DIST, "index.html"))
+        return FileResponse(
+            os.path.join(_DIST, "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
 
 if __name__ == "__main__":
