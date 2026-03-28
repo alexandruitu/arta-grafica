@@ -143,6 +143,9 @@ export default function PlanningList() {
 
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
 
+      {/* AI Assistant — deasupra tabelului */}
+      <AIAssistant tab="planificare" />
+
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -186,9 +189,6 @@ export default function PlanningList() {
           <p className="text-center py-8 text-slate-400">Nicio planificare. Ruleaza din Dashboard.</p>
         )}
       </div>
-
-      {/* AI Assistant */}
-      <AIAssistant tab="planificare" />
     </div>
   );
 }
