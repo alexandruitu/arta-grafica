@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
-import { Factory, Package, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Factory, Package, AlertTriangle, CheckCircle, Clock, Upload, X, FileSpreadsheet } from 'lucide-react';
 import AIAssistant from './AIAssistant';
 
 interface Stats {
@@ -22,12 +22,23 @@ interface PlanningInfo {
   breakdown: Record<string, number>;
 }
 
+const EXPECTED_FILES = [
+  'Stari comenzi_AS.xlsx',
+  'Dispatch List_AS.xlsx',
+  'OperatiiWO_AS.xlsx',
+  'Lista Deficite_AS.xlsx',
+  'Resurse_AS.xlsx',
+];
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [planning, setPlanning] = useState<PlanningInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -43,13 +54,33 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, []);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) setSelectedFiles(Array.from(e.target.files));
+  };
+
+  const removeFile = (name: string) => {
+    setSelectedFiles(prev => prev.filter(f => f.name !== name));
+  };
+
+  const missingFiles = EXPECTED_FILES.filter(name => !selectedFiles.some(f => f.name === name));
+  const extraFiles = selectedFiles.filter(f => !EXPECTED_FILES.includes(f.name));
+
   const handleImport = async () => {
+    if (!showFilePicker) { setShowFilePicker(true); return; }
+    if (missingFiles.length > 0) {
+      alert('Lipsesc fisierele:\n' + missingFiles.join('\n'));
+      return;
+    }
     setImportLoading(true);
     try {
-      await api.importData();
+      const fd = new FormData();
+      selectedFiles.filter(f => EXPECTED_FILES.includes(f.name)).forEach(f => fd.append('files', f));
+      await api.importData(fd);
       await loadData();
+      setShowFilePicker(false);
+      setSelectedFiles([]);
     } catch (e: any) {
-      alert('Import error: ' + e.message);
+      alert('Eroare import: ' + e.message);
     }
     setImportLoading(false);
   };
@@ -80,21 +111,94 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Actions */}
-      <div className="flex gap-3">
-        <button
-          onClick={handleImport}
-          disabled={importLoading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
-        >
-          {importLoading ? 'Se importa...' : 'Import Date Excel'}
-        </button>
-        <button
-          onClick={handlePlan}
-          disabled={planLoading || !stats?.total_comenzi}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
-        >
-          {planLoading ? 'Se planifica...' : 'Ruleaza Planificarea'}
-        </button>
+      <div className="space-y-3">
+        <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={handleImport}
+            disabled={importLoading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium flex items-center gap-2"
+          >
+            <Upload size={16} />
+            {importLoading ? 'Se importa...' : 'Import Date Excel'}
+          </button>
+          <button
+            onClick={handlePlan}
+            disabled={planLoading || !stats?.total_comenzi}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+          >
+            {planLoading ? 'Se planifica...' : 'Ruleaza Planificarea'}
+          </button>
+        </div>
+
+        {/* File picker panel */}
+        {showFilePicker && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-700">Selecteaza cele 5 fisiere Excel:</p>
+              <button onClick={() => { setShowFilePicker(false); setSelectedFiles([]); }} className="text-slate-400 hover:text-slate-600">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Hidden multi-file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".xlsx"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-400 rounded-lg text-sm text-slate-600 hover:border-blue-400 hover:text-blue-600 w-full justify-center"
+            >
+              <FileSpreadsheet size={16} />
+              Selecteaza fisierele .xlsx (poti selecta mai multe simultan)
+            </button>
+
+            {/* Selected files list */}
+            {selectedFiles.length > 0 && (
+              <div className="space-y-1">
+                {EXPECTED_FILES.map(name => {
+                  const found = selectedFiles.find(f => f.name === name);
+                  return (
+                    <div key={name} className={`flex items-center justify-between text-xs px-2 py-1 rounded ${found ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-500'}`}>
+                      <span>{found ? '✓' : '✗'} {name}</span>
+                      {found && (
+                        <button onClick={() => removeFile(name)} className="ml-2 opacity-60 hover:opacity-100"><X size={11} /></button>
+                      )}
+                    </div>
+                  );
+                })}
+                {extraFiles.map(f => (
+                  <div key={f.name} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-amber-50 text-amber-700">
+                    <span>⚠ {f.name} (neasteptat)</span>
+                    <button onClick={() => removeFile(f.name)} className="ml-2 opacity-60 hover:opacity-100"><X size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Expected files hint when nothing selected */}
+            {selectedFiles.length === 0 && (
+              <div className="space-y-0.5">
+                {EXPECTED_FILES.map(name => (
+                  <div key={name} className="text-xs text-slate-400 px-2">• {name}</div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={handleImport}
+              disabled={importLoading || missingFiles.length > 0}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 font-medium text-sm flex items-center justify-center gap-2"
+            >
+              <Upload size={15} />
+              {importLoading ? 'Se importa...' : missingFiles.length > 0 ? `Lipsesc ${missingFiles.length} fisiere` : 'Importa'}
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && <p className="text-slate-500">Se incarca...</p>}

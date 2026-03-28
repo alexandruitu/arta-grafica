@@ -39,6 +39,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+async function uploadForm<T>(path: string, formData: FormData): Promise<T> {
+  const token = getToken();
+  // Do NOT set Content-Type — browser sets it with multipart boundary automatically
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.location.reload();
+    throw new Error('Sesiune expirată');
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 export const auth = {
   login: (username: string, password: string) =>
     request<{ token: string }>('/auth/login', {
@@ -49,7 +70,7 @@ export const auth = {
 
 export const api = {
   // Import & Plan
-  importData: () => request('/import', { method: 'POST' }),
+  importData: (formData: FormData) => uploadForm('/import', formData),
   runPlanning: () => request('/plan', { method: 'POST' }),
 
   // Stats

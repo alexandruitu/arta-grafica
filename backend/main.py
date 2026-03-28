@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
 import hashlib as _hashlib
-from fastapi import FastAPI, Depends, Query, HTTPException, Request
+from fastapi import FastAPI, Depends, Query, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -65,12 +65,34 @@ def login(body: dict):
         return {"token": _VALID_TOKEN}
     raise HTTPException(status_code=401, detail="Credentiale incorecte")
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+
+_EXPECTED_FILES = {
+    "Stari comenzi_AS.xlsx",
+    "Dispatch List_AS.xlsx",
+    "OperatiiWO_AS.xlsx",
+    "Lista Deficite_AS.xlsx",
+    "Resurse_AS.xlsx",
+}
 
 
 # --- Import ---
 @app.post("/api/import", response_model=ImportResult)
-def do_import(db: Session = Depends(get_db)):
+async def do_import(
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    received = {f.filename: f for f in files}
+    missing = _EXPECTED_FILES - set(received.keys())
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Fisiere lipsa: {', '.join(sorted(missing))}")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    for filename, upload in received.items():
+        if filename not in _EXPECTED_FILES:
+            continue
+        content = await upload.read()
+        with open(os.path.join(DATA_DIR, filename), "wb") as fp:
+            fp.write(content)
     results = import_all(db, DATA_DIR)
     return ImportResult(**results)
 
