@@ -90,6 +90,9 @@ export default function PlanningList() {
         </select>
       </div>
 
+      {/* AI Assistant — sus, imediat dupa filtre */}
+      <AIAssistant tab="planificare" />
+
       {/* Stats cards — reflect current filter */}
       {results.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -142,9 +145,6 @@ export default function PlanningList() {
       )}
 
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
-
-      {/* AI Assistant — deasupra tabelului */}
-      <AIAssistant tab="planificare" />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
