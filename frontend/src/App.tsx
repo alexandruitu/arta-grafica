@@ -5,7 +5,9 @@ import BoardView from './components/BoardView';
 import ComenziList from './components/ComenziList';
 import PlanningList from './components/PlanningList';
 import StocView from './components/StocView';
-import { LayoutDashboard, GanttChart, LayoutGrid, Package, ListChecks, Boxes } from 'lucide-react';
+import LoginPage from './components/LoginPage';
+import { LayoutDashboard, GanttChart, LayoutGrid, Package, ListChecks, Boxes, LogOut } from 'lucide-react';
+import { getToken, clearToken } from './api/client';
 import './index.css';
 
 type Tab = 'dashboard' | 'gantt' | 'board' | 'comenzi' | 'planificare' | 'stoc';
@@ -20,7 +22,17 @@ const tabs: { id: Tab; label: string; icon: any }[] = [
 ];
 
 export default function App() {
+  const [authenticated, setAuthenticated] = useState<boolean>(() => !!getToken());
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+
+  const handleLogout = () => {
+    clearToken();
+    setAuthenticated(false);
+  };
+
+  if (!authenticated) {
+    return <LoginPage onLogin={() => setAuthenticated(true)} />;
+  }
 
   return (
     <div className="min-h-screen">
@@ -36,6 +48,14 @@ export default function App() {
               <p className="text-xs text-slate-500">Planificare Productie</p>
             </div>
           </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-red-600 transition-colors px-2 py-1 rounded-lg hover:bg-red-50"
+            title="Deconectare"
+          >
+            <LogOut size={15} />
+            <span className="hidden sm:inline">Deconectare</span>
+          </button>
         </div>
       </header>
 

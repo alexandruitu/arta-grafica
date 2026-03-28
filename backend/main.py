@@ -4,10 +4,11 @@ import os
 from typing import List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
-from fastapi import FastAPI, Depends, Query, HTTPException
+import hashlib as _hashlib
+from fastapi import FastAPI, Depends, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import json as _json
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -26,6 +27,14 @@ from planner import run_planning
 
 Base.metadata.create_all(bind=engine)
 
+# ── Auth ───────────────────────────────────────────────────────────────────────
+_AUTH_USER = "andrei"
+_AUTH_PASS = "sarbu1234"
+_AUTH_SALT = "arta-grafica-2026"
+_VALID_TOKEN: str = _hashlib.sha256(
+    f"{_AUTH_USER}:{_AUTH_PASS}:{_AUTH_SALT}".encode()
+).hexdigest()
+
 app = FastAPI(title="Arta Grafica - Production Planning", version="1.0.0")
 
 app.add_middleware(
@@ -35,6 +44,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Public: login endpoint + all static/SPA assets
+    if path == "/api/auth/login" or not path.startswith("/api/"):
+        return await call_next(request)
+    # Protected: all other /api/* routes
+    token = request.headers.get("Authorization", "")
+    if token == f"Bearer {_VALID_TOKEN}":
+        return await call_next(request)
+    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+@app.post("/api/auth/login")
+def login(body: dict):
+    if body.get("username") == _AUTH_USER and body.get("password") == _AUTH_PASS:
+        return {"token": _VALID_TOKEN}
+    raise HTTPException(status_code=401, detail="Credentiale incorecte")
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "")
 
