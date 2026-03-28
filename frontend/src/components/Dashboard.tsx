@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { Factory, Package, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import AIAssistant from './AIAssistant';
 
 interface Stats {
   total_comenzi: number;
@@ -155,6 +156,9 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* AI Assistant */}
+      {stats && <AIAssistant tab="dashboard" />}
     </div>
   );
 }

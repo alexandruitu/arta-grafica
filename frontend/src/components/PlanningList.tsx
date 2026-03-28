@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import AIAssistant from './AIAssistant';
 
 export default function PlanningList() {
   const [results, setResults] = useState<any[]>([]);
@@ -185,6 +186,9 @@ export default function PlanningList() {
           <p className="text-center py-8 text-slate-400">Nicio planificare. Ruleaza din Dashboard.</p>
         )}
       </div>
+
+      {/* AI Assistant */}
+      <AIAssistant tab="planificare" />
     </div>
   );
 }
