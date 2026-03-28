@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+// @ts-ignore – frappe-gantt has no type declarations
 import Gantt from 'frappe-gantt';
 import { api } from '../api/client';
 

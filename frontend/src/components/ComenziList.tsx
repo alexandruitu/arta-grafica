@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 
 export default function ComenziList() {
   const [comenzi, setComenzi] = useState<any[]>([]);
-  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [_totalCount, setTotalCount] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [stadiuFilter, setStadiuFilter] = useState('');

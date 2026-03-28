@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
-import { Factory, Package, AlertTriangle, CheckCircle, Clock, Truck } from 'lucide-react';
+import { Factory, Package, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 
 interface Stats {
   total_comenzi: number;

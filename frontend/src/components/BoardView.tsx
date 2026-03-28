@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 // Use standalone build so Timeline + DataSet are bundled together
-import { Timeline, DataSet } from 'vis-timeline/standalone';
+import { Timeline } from 'vis-timeline/standalone';
+import { DataSet } from 'vis-data';
 import { api } from '../api/client';
 
 export default function BoardView() {
