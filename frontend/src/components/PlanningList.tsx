@@ -177,7 +177,7 @@ export default function PlanningList() {
                     {r.data_end ? new Date(r.data_end).toLocaleDateString('ro-RO') : '-'}
                   </td>
                   <td className="px-3 py-2 text-right">{r.durata_ore?.toFixed(1)}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500 max-w-[250px] truncate" title={r.motiv}>
+                  <td className="px-3 py-2 text-xs text-slate-500 min-w-[320px]">
                     {r.motiv || '-'}
                   </td>
                 </tr>
