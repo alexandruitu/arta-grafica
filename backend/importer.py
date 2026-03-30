@@ -178,7 +178,7 @@ def import_deficite(db: Session, filepath: str):
         d = Deficit(
             articol=safe_str(row.get("Articol")),
             sold_actual=safe_float(row.get("SoldActual")),
-            cantitate=safe_float(row.get("Cantitate")),
+            cantitate=safe_float(row.get("CantitateRezervata") if "CantitateRezervata" in row.index else row.get("Cantitate")),
             la_data=safe_date(row.get("LaData")),
             pentru=safe_str(row.get("Pentru")),
             pe_comanda=safe_int(row.get("PeComanda")),
