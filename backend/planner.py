@@ -165,7 +165,9 @@ def run_planning(db: Session) -> dict:
         if art not in stoc_tracker:
             stoc_tracker[art] = d.sold_actual if d.sold_actual else 0.0
         if d.tip_rezervare == "B" and d.pe_comanda:
-            cantitate = d.cantitate if d.cantitate else 0.0
+            # Store the absolute value of cantitate as the amount NEEDED.
+            # ERP may export positive or negative values for reservations.
+            cantitate = abs(d.cantitate) if d.cantitate else 0.0
             wo_materiale[str(d.pe_comanda)].append((art, cantitate))
 
     # ── Step 5: Operation capability map per resource ────────────────────────
@@ -209,13 +211,14 @@ def run_planning(db: Session) -> dict:
         materiale = wo_materiale.get(wo_str, [])
         material_lipsit = None
         for art, cantitate in materiale:
-            if stoc_tracker.get(art, 0.0) + cantitate < 0:
-                material_lipsit = (art, stoc_tracker.get(art, 0.0), cantitate)
+            available = stoc_tracker.get(art, 0.0)
+            if available < cantitate:
+                material_lipsit = (art, available, cantitate)
                 break
-        # Reserve materials immediately if all available
+        # Reserve materials (subtract from stock) if all available
         if not material_lipsit:
             for art, cantitate in materiale:
-                stoc_tracker[art] = stoc_tracker.get(art, 0.0) + cantitate
+                stoc_tracker[art] = stoc_tracker.get(art, 0.0) - cantitate
 
         # ── Per-WO rank tracking ──────────────────────────────────────────────
         # rank_status[rank] = "completed" | "planned" | "open"
@@ -308,7 +311,7 @@ def run_planning(db: Session) -> dict:
                     resursa_id=None, resursa_nume=None,
                     data_start=None, data_end=None, durata_ore=remaining,
                     status="no_material",
-                    motiv=f"Stoc insuficient {art}: disponibil={available:.0f}, necesar={abs(cantitate):.0f}",
+                    motiv=f"Stoc insuficient {art}: disponibil={available:.0f}, necesar={cantitate:.0f}",
                 ))
                 stats["no_material"] += 1
                 update_rank(rank, "open")
