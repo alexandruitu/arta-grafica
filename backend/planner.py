@@ -228,10 +228,6 @@ def run_planning(db: Session) -> dict:
             if available < cantitate:
                 material_lipsit = (art, available, cantitate)
                 break
-        # Reserve materials (subtract from stock) if all available
-        if not material_lipsit:
-            for art, cantitate in materiale:
-                stoc_tracker[art] = stoc_tracker.get(art, 0.0) - cantitate
 
         # ── Determine WO-level planning mode ─────────────────────────────────
         wo_block: tuple[str, str] | None = None
@@ -261,6 +257,13 @@ def run_planning(db: Session) -> dict:
             else:
                 new_start = mat_date
                 wo_previzionat_start = max(wo_previzionat_start, new_start) if wo_previzionat_start else new_start
+
+        # Reserve materials only if WO is not hard-blocked.
+        # Previzionat WOs are considered committed (material will arrive), so
+        # we still deduct their stock to avoid double-counting.
+        if wo_block is None and not material_lipsit:
+            for art, cantitate in materiale:
+                stoc_tracker[art] = stoc_tracker.get(art, 0.0) - cantitate
 
         # ── Per-WO rank tracking ──────────────────────────────────────────────
         # rank_status[rank] = "completed" | "planned" | "previzionat" | "open"

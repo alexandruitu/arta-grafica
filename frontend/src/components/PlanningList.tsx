@@ -28,8 +28,9 @@ export default function PlanningList() {
   useEffect(() => { loadResults(); }, [selectedCL, selectedStatus]);
 
   const stats = useMemo(() => {
-    const planned    = results.filter(r => r.status === 'planned');
-    const oreTotal   = planned.reduce((s, r) => s + (r.durata_ore || 0), 0);
+    const planned        = results.filter(r => r.status === 'planned');
+    const plannedOrPrev  = results.filter(r => r.status === 'planned' || r.status === 'previzionat');
+    const oreTotal       = plannedOrPrev.reduce((s, r) => s + (r.durata_ore || 0), 0);
     return {
       total:        results.length,
       planned:      planned.length,
