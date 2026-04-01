@@ -138,8 +138,8 @@ class TestPlanificare:
         """Session header counts should match actual result rows."""
         s = self._get_latest_sesiune(db)
         results = self._get_results(db)
-        planned = [r for r in results if r.status == "planned"]
-        unplanned = [r for r in results if r.status != "planned"]
+        planned = [r for r in results if r.status in ("planned", "previzionat")]
+        unplanned = [r for r in results if r.status not in ("planned", "previzionat")]
         assert s.operatii_planificate == len(planned), (
             f"Session says {s.operatii_planificate} planned but found {len(planned)} results"
         )
@@ -149,7 +149,7 @@ class TestPlanificare:
 
     def test_all_statuses_are_valid(self, db: Session):
         results = self._get_results(db)
-        valid = {"planned", "no_material", "no_resource", "blocked_by_rank", "no_bt"}
+        valid = {"planned", "previzionat", "no_material", "no_resource", "blocked_by_rank", "no_bt"}
         for r in results:
             assert r.status in valid, f"Invalid status '{r.status}' for result {r.id}"
 
@@ -167,10 +167,11 @@ class TestPlanificare:
                 )
 
     def test_unplanned_ops_have_no_dates(self, db: Session):
-        """Unplanned operations should NOT have resource/dates assigned."""
+        """Unplanned operations should NOT have resource/dates assigned.
+        previzionat ops are forward-scheduled so they DO have dates."""
         results = self._get_results(db)
         for r in results:
-            if r.status != "planned":
+            if r.status not in ("planned", "previzionat"):
                 assert r.data_start is None, f"Unplanned op {r.id} ({r.status}) has data_start"
                 assert r.data_end is None, f"Unplanned op {r.id} ({r.status}) has data_end"
 
@@ -405,11 +406,11 @@ class TestStocAprov:
 
 class TestBoard:
     def test_board_items_match_planned_count(self, db: Session):
-        """Board should show exactly the planned operations."""
+        """Board should show exactly the planned + previzionat operations."""
         s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
         planned_count = db.query(PlanificareRezultat).filter(
             PlanificareRezultat.sesiune_id == s.id,
-            PlanificareRezultat.status == "planned",
+            PlanificareRezultat.status.in_(["planned", "previzionat"]),
         ).count()
         assert planned_count > 0, "No planned operations found"
         assert planned_count == s.operatii_planificate, (
@@ -500,10 +501,11 @@ class TestCrossTabConsistency:
         total = len(results)
         assert total > 0, "No planning results"
         assert counts["planned"] > 100, f"Too few planned: {counts['planned']}"
-        assert counts["planned"] + counts["no_material"] + counts["blocked_by_rank"] + \
-               counts["no_bt"] + counts["no_resource"] == total, \
+        assert counts["planned"] + counts["previzionat"] + counts["no_material"] + \
+               counts["blocked_by_rank"] + counts["no_bt"] + counts["no_resource"] == total, \
                "Status counts don't sum to total"
         print(f"\n  Planning distribution: planned={counts['planned']}, "
+              f"previzionat={counts['previzionat']}, "
               f"no_material={counts['no_material']}, blocked={counts['blocked_by_rank']}, "
               f"no_bt={counts['no_bt']}, no_resource={counts['no_resource']}")
 
@@ -807,6 +809,60 @@ class TestPlanningLock:
         third = m._PLAN_LOCK.acquire(blocking=False)
         assert third, "Lock should be free after release"
         m._PLAN_LOCK.release()
+
+
+class TestPrevizionat:
+    def test_previzionat_status_is_valid(self, db: Session):
+        """If previzionat exists in results, it must have data_start and data_end."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        prev_ops = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+            PlanificareRezultat.status == "previzionat",
+        ).all()
+        for r in prev_ops:
+            assert r.data_start is not None, f"previzionat op {r.id} missing data_start"
+            assert r.data_end is not None, f"previzionat op {r.id} missing data_end"
+            assert r.resursa_id is not None, f"previzionat op {r.id} missing resursa_id"
+
+    def test_no_bt_with_limita_bt_becomes_previzionat(self, db: Session):
+        """A comanda without BT but with data_limita_bt must produce previzionat (not no_bt) results,
+        assuming resources are available."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        from planner import has_valid_bt
+        candidates = db.query(Comanda).filter(
+            Comanda.status_cda != "STOP",
+            Comanda.data_limita_bt.isnot(None),
+        ).limit(50).all()
+        no_bt_with_date = [c for c in candidates if not has_valid_bt(c)]
+        if not no_bt_with_date:
+            return  # No such orders in test data, skip
+        wo = no_bt_with_date[0].cp
+        results = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+            PlanificareRezultat.wo == wo,
+        ).all()
+        if results:
+            statuses = {r.status for r in results}
+            assert "no_bt" not in statuses, (
+                f"WO {wo} has data_limita_bt={no_bt_with_date[0].data_limita_bt} "
+                f"but was still blocked as no_bt. Should be previzionat or no_resource."
+            )
+
+    def test_all_statuses_include_previzionat(self, db: Session):
+        """Valid statuses now include previzionat."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        valid = {"planned", "previzionat", "no_material", "no_resource", "blocked_by_rank", "no_bt"}
+        results = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+        ).all()
+        for r in results:
+            assert r.status in valid, f"Invalid status '{r.status}' for result {r.id}"
 
 
 class TestCredentialsFromEnv:

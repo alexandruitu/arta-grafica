@@ -33,6 +33,7 @@ export default function PlanningList() {
     return {
       total:        results.length,
       planned:      planned.length,
+      previzionat:  results.filter(r => r.status === 'previzionat').length,
       no_material:  results.filter(r => r.status === 'no_material').length,
       blocked:      results.filter(r => r.status === 'blocked_by_rank').length,
       no_bt:        results.filter(r => r.status === 'no_bt').length,
@@ -44,6 +45,7 @@ export default function PlanningList() {
   const statusBadge = (status: string) => {
     const styles: Record<string, string> = {
       planned: 'bg-green-100 text-green-700',
+      previzionat: 'bg-blue-100 text-blue-700',
       no_material: 'bg-red-100 text-red-700',
       no_resource: 'bg-slate-100 text-slate-700',
       blocked_by_rank: 'bg-amber-100 text-amber-700',
@@ -51,6 +53,7 @@ export default function PlanningList() {
     };
     const labels: Record<string, string> = {
       planned: 'Planificat',
+      previzionat: 'Previzionat',
       no_material: 'Fara Material',
       no_resource: 'Fara Resursa',
       blocked_by_rank: 'Blocat Rank',
@@ -83,6 +86,7 @@ export default function PlanningList() {
         >
           <option value="">Toate statusurile</option>
           <option value="planned">Planificat</option>
+          <option value="previzionat">Previzionat</option>
           <option value="no_material">Fara Material</option>
           <option value="no_resource">Fara Resursa</option>
           <option value="blocked_by_rank">Blocat Rank</option>
@@ -95,7 +99,7 @@ export default function PlanningList() {
 
       {/* Stats cards — reflect current filter */}
       {results.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-500 mb-0.5">Total afișate</p>
             <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
@@ -108,6 +112,14 @@ export default function PlanningList() {
             <p className="text-xs text-slate-500 mb-0.5">Planificate</p>
             <p className="text-2xl font-bold text-green-700">{stats.planned}</p>
             <p className="text-xs text-slate-400">{stats.ore.toFixed(0)} ore totale</p>
+          </button>
+          <button
+            onClick={() => setSelectedStatus(selectedStatus === 'previzionat' ? '' : 'previzionat')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'previzionat' ? 'bg-blue-100 border-blue-400' : 'bg-white border-slate-200 hover:bg-blue-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">Previzionate</p>
+            <p className="text-2xl font-bold text-blue-600">{stats.previzionat}</p>
+            <p className="text-xs text-slate-400">programate viitor</p>
           </button>
           <button
             onClick={() => setSelectedStatus(selectedStatus === 'no_material' ? '' : 'no_material')}
