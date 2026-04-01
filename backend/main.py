@@ -1,7 +1,7 @@
 """FastAPI backend for Arta Grafica Production Planning."""
 from __future__ import annotations
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
 import hashlib as _hashlib
@@ -21,7 +21,7 @@ from models import (
 )
 from schemas import (
     ComandaOut, DispatchOut, PlanificareOut, GanttTask,
-    ResursaOut, ImportResult, PlanningResult, StocArticol,
+    ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary,
 )
 from importer import import_all
 from planner import run_planning
@@ -443,12 +443,10 @@ def get_planning_results(
     return q.offset(offset).limit(limit).all()
 
 
-@app.get("/api/planificare/by-comanda")
+@app.get("/api/planificare/by-comanda", response_model=Dict[str, ComandaSummary])
 def get_planning_by_comanda(db: Session = Depends(get_db)):
     """Per-WO planning summary keyed by WO string.
     Note: status_material uses global (non-sequential) stock view — useful approximation."""
-    from datetime import date as _date
-
     sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
     if not sesiune:
         return {}
