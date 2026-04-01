@@ -872,6 +872,84 @@ class TestPrevizionat:
             assert r.status in valid, f"Invalid status '{r.status}' for result {r.id}"
 
 
+class TestFrozen:
+    def test_frozen_op_carried_to_next_session(self, db: Session):
+        """If an op is frozen in session N, the next planning run (session N+1)
+        must include it with the same resursa_id, data_start, data_end, and frozen=True."""
+        from planner import run_planning
+
+        s1 = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s1:
+            return
+        planned_op = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s1.id,
+            PlanificareRezultat.status.in_(["planned", "previzionat"]),
+        ).first()
+        if not planned_op:
+            return
+
+        planned_op.frozen = True
+        db.commit()
+
+        frozen_wo = planned_op.wo
+        frozen_op_code = planned_op.op
+        frozen_resursa = planned_op.resursa_id
+        frozen_start = planned_op.data_start
+        frozen_end = planned_op.data_end
+
+        run_planning(db)
+
+        s2 = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        assert s2.id > s1.id, "New session not created"
+
+        new_op = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s2.id,
+            PlanificareRezultat.wo == frozen_wo,
+            PlanificareRezultat.op == frozen_op_code,
+        ).first()
+        assert new_op is not None, f"Frozen op WO={frozen_wo} OP={frozen_op_code} not in new session"
+        assert new_op.frozen == True, "Frozen op should still be frozen in new session"
+        assert new_op.resursa_id == frozen_resursa, "Frozen op should keep same resource"
+        assert new_op.data_start == frozen_start, "Frozen op should keep same start"
+        assert new_op.data_end == frozen_end, "Frozen op should keep same end"
+
+        # Clean up: unfreeze ops in both sessions so subsequent tests see no frozen rows
+        planned_op.frozen = False
+        for row in db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s2.id,
+            PlanificareRezultat.frozen == True,
+        ).all():
+            row.frozen = False
+        db.commit()
+
+    def test_frozen_field_default_is_false(self, db: Session):
+        """All newly planned operations should have frozen=False by default."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        frozen_count = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+            PlanificareRezultat.frozen == True,
+        ).count()
+        assert frozen_count == 0, (
+            f"Fresh planning run produced {frozen_count} frozen ops — expected 0"
+        )
+
+    def test_only_planned_ops_can_be_frozen(self, db: Session):
+        """Unplanned ops (no_bt, no_material, etc.) must have frozen=False by default."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        unplanned = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+            PlanificareRezultat.status.notin_(["planned", "previzionat"]),
+        ).all()
+        for r in unplanned:
+            assert not r.frozen, (
+                f"Unplanned op {r.id} (status={r.status}) has frozen=True — should not be possible"
+            )
+
+
 class TestCredentialsFromEnv:
     """Verify auth credentials are read from environment variables."""
 

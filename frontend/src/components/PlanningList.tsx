@@ -43,6 +43,15 @@ export default function PlanningList() {
     };
   }, [results]);
 
+  const handleToggleFrozen = async (id: number, currentFrozen: boolean) => {
+    try {
+      await api.toggleFrozen(id, !currentFrozen);
+      setResults(prev => prev.map(r => r.id === id ? { ...r, frozen: !currentFrozen } : r));
+    } catch {
+      alert('Nu s-a putut schimba starea frozen.');
+    }
+  };
+
   const statusBadge = (status: string) => {
     const styles: Record<string, string> = {
       planned: 'bg-green-100 text-green-700',
@@ -169,6 +178,7 @@ export default function PlanningList() {
                 <th className="px-3 py-2 text-left">CL</th>
                 <th className="px-3 py-2 text-left">Resursa</th>
                 <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Freeze</th>
                 <th className="px-3 py-2 text-left">Start</th>
                 <th className="px-3 py-2 text-left">End</th>
                 <th className="px-3 py-2 text-right">Durata (h)</th>
@@ -182,7 +192,27 @@ export default function PlanningList() {
                   <td className="px-3 py-2 font-mono">{r.op}</td>
                   <td className="px-3 py-2">{r.cl}</td>
                   <td className="px-3 py-2">{r.resursa_nume || '-'}</td>
-                  <td className="px-3 py-2">{statusBadge(r.status)}</td>
+                  <td className="px-3 py-2">
+                    {r.frozen && <span className="text-purple-400 mr-1 text-xs">❄</span>}
+                    {statusBadge(r.status)}
+                  </td>
+                  <td className="px-3 py-2">
+                    {(r.status === 'planned' || r.status === 'previzionat') ? (
+                      <button
+                        onClick={e => { e.stopPropagation(); handleToggleFrozen(r.id, r.frozen); }}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                          r.frozen
+                            ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                        title={r.frozen ? 'Unfreeze operatie' : 'Freeze operatie (fixeaza pozitia)'}
+                      >
+                        {r.frozen ? '❄ Frozen' : 'Freeze'}
+                      </button>
+                    ) : (
+                      <span className="text-slate-300 text-xs">-</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {r.data_start ? new Date(r.data_start).toLocaleDateString('ro-RO') : '-'}
                   </td>

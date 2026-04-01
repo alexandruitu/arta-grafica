@@ -536,6 +536,22 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
     return summaries
 
 
+@app.patch("/api/planificare/operatii/{result_id}/frozen")
+def set_frozen(result_id: int, body: dict, db: Session = Depends(get_db)):
+    """Freeze or unfreeze a planned operation. Frozen ops survive replanning."""
+    r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
+    if r.status not in ("planned", "previzionat"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Doar operatiile planificate pot fi frozen (status curent: {r.status})",
+        )
+    r.frozen = bool(body.get("frozen", not r.frozen))
+    db.commit()
+    return {"id": r.id, "frozen": r.frozen, "status": r.status}
+
+
 # --- Stoc ---
 @app.get("/api/stoc", response_model=List[StocArticol])
 def get_stoc(

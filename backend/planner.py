@@ -125,6 +125,21 @@ def run_planning(db: Session) -> dict:
     db.add(sesiune)
     db.flush()
 
+    # ── Step 0: Load frozen operations from the last completed session ─────────
+    prev_sesiune = (
+        db.query(PlanificareSesiune)
+        .filter(PlanificareSesiune.status == "completed")
+        .order_by(PlanificareSesiune.id.desc())
+        .first()
+    )
+    frozen_ops: dict[tuple[int, int], PlanificareRezultat] = {}
+    if prev_sesiune:
+        for fr in db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == prev_sesiune.id,
+            PlanificareRezultat.frozen == True,
+        ).all():
+            frozen_ops[(fr.wo, fr.op)] = fr
+
     # ── Step 1: Load and sort orders ──────────────────────────────────────────
     comenzi = (
         db.query(Comanda)
@@ -153,6 +168,20 @@ def run_planning(db: Session) -> dict:
     disponibilitate: dict[int, dict[date, float]] = defaultdict(lambda: defaultdict(float))
     for prog in db.query(ProgramResursa).all():
         disponibilitate[prog.resursa_id][prog.data] = prog.ore_disponibile
+
+    # Pre-allocate resource hours for frozen operations
+    for fr in frozen_ops.values():
+        if fr.resursa_id and fr.data_start and fr.data_end and fr.durata_ore > 0:
+            hours_left = fr.durata_ore
+            day = fr.data_start.date()
+            end_day = fr.data_end.date()
+            while hours_left > 0 and day <= end_day:
+                avail = disponibilitate[fr.resursa_id].get(day, 0.0)
+                if avail > 0:
+                    consumed = min(avail, hours_left)
+                    disponibilitate[fr.resursa_id][day] -= consumed
+                    hours_left -= consumed
+                day += timedelta(days=1)
 
     # ── Step 4: Build material stock tracker ─────────────────────────────────
     # stoc_tracker[articol] = available quantity (updated as WOs are reserved)
@@ -292,6 +321,24 @@ def run_planning(db: Session) -> dict:
                     rank_end_date[rank] = end_date
 
         for disp in dispatch_items:
+            # ── Frozen: carry from previous session unchanged ─────────────────
+            key = (disp.wo, disp.op)
+            if key in frozen_ops:
+                fr = frozen_ops[key]
+                db.add(PlanificareRezultat(
+                    sesiune_id=sesiune.id,
+                    dispatch_id=disp.id,
+                    wo=fr.wo, op=fr.op, cl=fr.cl,
+                    resursa_id=fr.resursa_id, resursa_nume=fr.resursa_nume,
+                    data_start=fr.data_start, data_end=fr.data_end,
+                    durata_ore=fr.durata_ore,
+                    frozen=True, status=fr.status, motiv=None,
+                ))
+                stats[fr.status] += 1
+                frozen_rank = get_rank(disp)
+                update_rank(frozen_rank, fr.status, fr.data_end.date() if fr.data_end else None)
+                continue
+
             remaining = calc_remaining_time(disp)
             op_code = str(disp.op)
             rank = get_rank(disp)

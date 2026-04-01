@@ -109,6 +109,11 @@ export const api = {
     return request<any[]>(`/planificare/operatii${qs}`);
   },
   getPlanningByComanda: () => request<Record<string, any>>('/planificare/by-comanda'),
+  toggleFrozen: (resultId: number, frozen: boolean) =>
+    request<{ id: number; frozen: boolean; status: string }>(
+      `/planificare/operatii/${resultId}/frozen`,
+      { method: 'PATCH', body: JSON.stringify({ frozen }) }
+    ),
 
   // Stoc
   getStoc: (search?: string) => {
