@@ -21,7 +21,7 @@ from models import (
 )
 from schemas import (
     ComandaOut, DispatchOut, PlanificareOut, GanttTask,
-    ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary,
+    ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary, FrozenBody,
 )
 from importer import import_all
 from planner import run_planning
@@ -537,7 +537,7 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
 
 
 @app.patch("/api/planificare/operatii/{result_id}/frozen")
-def set_frozen(result_id: int, body: dict, db: Session = Depends(get_db)):
+def set_frozen(result_id: int, body: FrozenBody, db: Session = Depends(get_db)):
     """Freeze or unfreeze a planned operation. Frozen ops survive replanning."""
     r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
     if not r:
@@ -547,7 +547,7 @@ def set_frozen(result_id: int, body: dict, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"Doar operatiile planificate pot fi frozen (status curent: {r.status})",
         )
-    r.frozen = bool(body.get("frozen", not r.frozen))
+    r.frozen = body.frozen
     db.commit()
     return {"id": r.id, "frozen": r.frozen, "status": r.status}
 

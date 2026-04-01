@@ -122,3 +122,7 @@ class ComandaSummary(BaseModel):
     intarziere_zile: Optional[int] = None    # positive=late, negative=early, None=unknown
     status_planificare: str                  # "Planificat" | "Previzionat" | "Partial" | "Blocat"
     status_material: str                     # "Disponibil" | "In aprovizionare" | "Lipsa"
+
+
+class FrozenBody(BaseModel):
+    frozen: bool
