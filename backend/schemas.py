@@ -112,4 +112,6 @@ class StocArticol(BaseModel):
     articol: str
     sold_actual: float
     total_rezervat: float
+    total_aprovizionare: float
     disponibil: float
+    disponibil_final: float

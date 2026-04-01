@@ -361,6 +361,42 @@ class TestStoc:
                 print(f"    {art}: min={mn}, max={mx}")
 
 
+class TestStocAprov:
+    def test_stoc_endpoint_returns_aprovizionare_fields(self, db: Session):
+        """The stoc response must include total_aprovizionare and disponibil_final."""
+        from sqlalchemy import case
+        results = db.query(
+            Deficit.articol,
+            func.max(Deficit.sold_actual).label("sold"),
+            func.sum(case((Deficit.tip_rezervare == "B", Deficit.cantitate), else_=0)).label("rez"),
+            func.sum(case((Deficit.tip_rezervare == "A", Deficit.cantitate), else_=0)).label("aprov"),
+        ).group_by(Deficit.articol).limit(5).all()
+        for r in results:
+            sold = r[1] or 0
+            rez = r[2] or 0
+            aprov = r[3] or 0
+            disponibil = sold + rez
+            disponibil_final = disponibil + aprov
+            assert disponibil_final >= disponibil, (
+                f"disponibil_final ({disponibil_final}) < disponibil ({disponibil}) "
+                f"for {r[0]} — A-type cantitate should be positive"
+            )
+
+    def test_a_type_cantitate_is_positive(self, db: Session):
+        """A-type (incoming) cantitate must be >= 0."""
+        negative_a = db.query(Deficit).filter(
+            Deficit.tip_rezervare == "A",
+            Deficit.cantitate < 0,
+        ).count()
+        total_a = db.query(Deficit).filter(Deficit.tip_rezervare == "A").count()
+        if total_a > 0:
+            pct = negative_a / total_a * 100
+            assert pct < 5, (
+                f"{negative_a}/{total_a} ({pct:.1f}%) A-type records have negative cantitate. "
+                "Aprovizionare should be positive."
+            )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5. BOARD ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -450,13 +450,18 @@ def get_stoc(
     limit: int = Query(50),
     db: Session = Depends(get_db),
 ):
-    # cantitate in Deficit table is stored as negative for B-type reservations.
-    # disponibil = sold_actual + sum(cantitate)  ← correct (adding negatives = subtracting)
-    # NOT sold_actual - sum(cantitate)           ← wrong (double negation inflates stock)
+    from sqlalchemy import case as _case
+    # B-type = reservations (negative cantitate)
+    # A-type = incoming stock / aprovizionare (positive cantitate)
     q = db.query(
         Deficit.articol,
         func.max(Deficit.sold_actual).label("sold_actual"),
-        func.sum(Deficit.cantitate).label("total_rezervat"),
+        func.sum(
+            _case((Deficit.tip_rezervare == "B", Deficit.cantitate), else_=0)
+        ).label("total_rezervat"),
+        func.sum(
+            _case((Deficit.tip_rezervare == "A", Deficit.cantitate), else_=0)
+        ).label("total_aprovizionare"),
     ).group_by(Deficit.articol)
 
     if search:
@@ -468,7 +473,9 @@ def get_stoc(
             articol=r[0],
             sold_actual=r[1] or 0,
             total_rezervat=r[2] or 0,
+            total_aprovizionare=r[3] or 0,
             disponibil=(r[1] or 0) + (r[2] or 0),
+            disponibil_final=(r[1] or 0) + (r[2] or 0) + (r[3] or 0),
         )
         for r in results
     ]

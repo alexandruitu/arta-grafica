@@ -99,6 +99,8 @@ export default function StocView() {
               <th className="px-3 py-2 text-right">Sold Actual</th>
               <th className="px-3 py-2 text-right">Total Rezervat</th>
               <th className="px-3 py-2 text-right">Disponibil</th>
+              <th className="px-3 py-2 text-right">APROV.</th>
+              <th className="px-3 py-2 text-right">Disp. Final</th>
               <th className="px-3 py-2 text-left">Status</th>
             </tr>
           </thead>
@@ -111,9 +113,17 @@ export default function StocView() {
                 <td className={`px-3 py-2 text-right font-medium ${s.disponibil < 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {s.disponibil?.toLocaleString('ro-RO')}
                 </td>
+                <td className="px-3 py-2 text-right text-blue-600">
+                  {s.total_aprovizionare > 0 ? `+${s.total_aprovizionare?.toLocaleString('ro-RO')}` : '-'}
+                </td>
+                <td className={`px-3 py-2 text-right font-semibold ${s.disponibil_final < 0 ? 'text-red-700' : s.disponibil_final === 0 ? 'text-amber-600' : 'text-green-700'}`}>
+                  {s.disponibil_final?.toLocaleString('ro-RO')}
+                </td>
                 <td className="px-3 py-2">
-                  {s.disponibil < 0 ? (
+                  {s.disponibil_final < 0 ? (
                     <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">Deficit</span>
+                  ) : s.disponibil < 0 ? (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">In aprovizionare</span>
                   ) : s.disponibil === 0 ? (
                     <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">Epuizat</span>
                   ) : (
