@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import json as _json
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case as _case
 
 from database import engine, get_db, Base
 from models import (
@@ -450,7 +450,6 @@ def get_stoc(
     limit: int = Query(50),
     db: Session = Depends(get_db),
 ):
-    from sqlalchemy import case as _case
     # B-type = reservations (negative cantitate)
     # A-type = incoming stock / aprovizionare (positive cantitate)
     q = db.query(

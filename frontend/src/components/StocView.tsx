@@ -24,18 +24,20 @@ export default function StocView() {
   };
 
   const stats = useMemo(() => ({
-    total:      stoc.length,
-    disponibil: stoc.filter(s => s.disponibil > 0).length,
-    epuizat:    stoc.filter(s => s.disponibil === 0).length,
-    deficit:    stoc.filter(s => s.disponibil < 0).length,
-    totalRezervat: stoc.reduce((sum, s) => sum + (s.total_rezervat || 0), 0),
+    total:            stoc.length,
+    disponibil:       stoc.filter(s => s.disponibil_final > 0).length,
+    epuizat:          stoc.filter(s => s.disponibil_final === 0).length,
+    deficit:          stoc.filter(s => s.disponibil_final < 0).length,
+    in_aprovizionare: stoc.filter(s => s.disponibil < 0 && s.disponibil_final >= 0).length,
+    totalRezervat:    stoc.reduce((sum, s) => sum + (s.total_rezervat || 0), 0),
   }), [stoc]);
 
-  const [filterStatus, setFilterStatus] = useState<'deficit' | 'epuizat' | ''>('');
+  const [filterStatus, setFilterStatus] = useState<'deficit' | 'epuizat' | 'in_aprovizionare' | ''>('');
 
   const visibleStoc = useMemo(() => {
-    if (filterStatus === 'deficit') return stoc.filter(s => s.disponibil < 0);
-    if (filterStatus === 'epuizat') return stoc.filter(s => s.disponibil === 0);
+    if (filterStatus === 'deficit') return stoc.filter(s => s.disponibil_final < 0);
+    if (filterStatus === 'epuizat') return stoc.filter(s => s.disponibil_final === 0);
+    if (filterStatus === 'in_aprovizionare') return stoc.filter(s => s.disponibil < 0 && s.disponibil_final >= 0);
     return stoc;
   }, [stoc, filterStatus]);
 
@@ -59,7 +61,7 @@ export default function StocView() {
 
       {/* Stats cards */}
       {stoc.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-500 mb-0.5">Total articole</p>
             <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
@@ -68,8 +70,16 @@ export default function StocView() {
           <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-500 mb-0.5">Disponibil</p>
             <p className="text-2xl font-bold text-green-600">{stats.disponibil}</p>
-            <p className="text-xs text-slate-400">stoc pozitiv</p>
+            <p className="text-xs text-slate-400">stoc pozitiv final</p>
           </div>
+          <button
+            onClick={() => setFilterStatus(filterStatus === 'in_aprovizionare' ? '' : 'in_aprovizionare')}
+            className={`rounded-lg border px-4 py-3 text-left transition-colors ${filterStatus === 'in_aprovizionare' ? 'bg-blue-100 border-blue-400' : 'bg-white border-slate-200 hover:bg-blue-50'}`}
+          >
+            <p className="text-xs text-slate-500 mb-0.5">In aprovizionare</p>
+            <p className="text-2xl font-bold text-blue-600">{stats.in_aprovizionare}</p>
+            <p className="text-xs text-slate-400">vine material</p>
+          </button>
           <button
             onClick={() => setFilterStatus(filterStatus === 'epuizat' ? '' : 'epuizat')}
             className={`rounded-lg border px-4 py-3 text-left transition-colors ${filterStatus === 'epuizat' ? 'bg-amber-100 border-amber-400' : 'bg-white border-slate-200 hover:bg-amber-50'}`}
@@ -84,7 +94,7 @@ export default function StocView() {
           >
             <p className="text-xs text-slate-500 mb-0.5">Deficit</p>
             <p className="text-2xl font-bold text-red-600">{stats.deficit}</p>
-            <p className="text-xs text-slate-400">disponibil negativ</p>
+            <p className="text-xs text-slate-400">disponibil final negativ</p>
           </button>
         </div>
       )}

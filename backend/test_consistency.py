@@ -384,17 +384,19 @@ class TestStocAprov:
 
     def test_a_type_cantitate_is_positive(self, db: Session):
         """A-type (incoming) cantitate must be >= 0."""
+        total_a = db.query(Deficit).filter(Deficit.tip_rezervare == "A").count()
+        if total_a == 0:
+            import pytest
+            pytest.skip("No A-type records in current dataset — skipping positive cantitate check")
         negative_a = db.query(Deficit).filter(
             Deficit.tip_rezervare == "A",
             Deficit.cantitate < 0,
         ).count()
-        total_a = db.query(Deficit).filter(Deficit.tip_rezervare == "A").count()
-        if total_a > 0:
-            pct = negative_a / total_a * 100
-            assert pct < 5, (
-                f"{negative_a}/{total_a} ({pct:.1f}%) A-type records have negative cantitate. "
-                "Aprovizionare should be positive."
-            )
+        pct = negative_a / total_a * 100
+        assert pct < 5, (
+            f"{negative_a}/{total_a} ({pct:.1f}%) A-type records have negative cantitate. "
+            "Aprovizionare should be positive."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
