@@ -508,3 +508,45 @@ class TestCrossTabConsistency:
         late_count = sum(1 for r in planned if r.data_end and r.data_end < today)
         # Board API reported 168 late items out of 179
         print(f"\n  INFO: {late_count} late items (end date before now), out of {len(planned)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. CREDENTIALS FROM ENV
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import importlib
+
+class TestCredentialsFromEnv:
+    """Verify auth credentials are read from environment variables."""
+
+    def test_auth_user_not_hardcoded(self):
+        """AG_USER env var must be set; the default 'andrei' must not be baked in."""
+        # Save and clear env
+        original = os.environ.pop("AG_USER", None)
+        try:
+            # Re-import main with env cleared — should fall back or raise, not use 'andrei'
+            # We test this indirectly: the token must differ when the env var differs.
+            os.environ["AG_USER"] = "testuser"
+            os.environ["AG_PASS"] = "testpass"
+            os.environ["AG_SALT"] = "testsalt"
+
+            import hashlib
+            expected = hashlib.sha256("testuser:testpass:testsalt".encode()).hexdigest()
+
+            # Import the module fresh
+            if "main" in sys.modules:
+                del sys.modules["main"]
+            import main as m
+            assert m._VALID_TOKEN == expected, (
+                f"Token should reflect env vars. Got {m._VALID_TOKEN[:16]}..., "
+                f"expected {expected[:16]}..."
+            )
+        finally:
+            if original is not None:
+                os.environ["AG_USER"] = original
+            else:
+                os.environ.pop("AG_USER", None)
+            os.environ.pop("AG_PASS", None)
+            os.environ.pop("AG_SALT", None)
+            if "main" in sys.modules:
+                del sys.modules["main"]

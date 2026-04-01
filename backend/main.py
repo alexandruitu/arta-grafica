@@ -28,9 +28,9 @@ from planner import run_planning
 Base.metadata.create_all(bind=engine)
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
-_AUTH_USER = "andrei"
-_AUTH_PASS = "sarbu1234"
-_AUTH_SALT = "arta-grafica-2026"
+_AUTH_USER = os.environ.get("AG_USER", "andrei")
+_AUTH_PASS = os.environ.get("AG_PASS", "sarbu1234")
+_AUTH_SALT = os.environ.get("AG_SALT", "arta-grafica-2026")
 _VALID_TOKEN: str = _hashlib.sha256(
     f"{_AUTH_USER}:{_AUTH_PASS}:{_AUTH_SALT}".encode()
 ).hexdigest()
