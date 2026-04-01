@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
 import hashlib as _hashlib
+import threading as _threading
 from fastapi import FastAPI, Depends, Query, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +35,8 @@ _AUTH_SALT = os.environ.get("AG_SALT", "arta-grafica-2026")
 _VALID_TOKEN: str = _hashlib.sha256(
     f"{_AUTH_USER}:{_AUTH_PASS}:{_AUTH_SALT}".encode()
 ).hexdigest()
+
+_PLAN_LOCK = _threading.Lock()
 
 app = FastAPI(title="Arta Grafica - Production Planning", version="1.0.0")
 
@@ -100,7 +103,15 @@ async def do_import(
 # --- Planning ---
 @app.post("/api/plan", response_model=PlanningResult)
 def do_plan(db: Session = Depends(get_db)):
-    result = run_planning(db)
+    if not _PLAN_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="O planificare este deja in curs. Asteptati finalizarea ei.",
+        )
+    try:
+        result = run_planning(db)
+    finally:
+        _PLAN_LOCK.release()
     return PlanningResult(**result)
 
 

@@ -678,6 +678,49 @@ class TestPathTraversal:
         )
 
 
+class TestPlanningLock:
+    """Verify that concurrent planning calls are serialized."""
+
+    def test_lock_exists_on_module(self):
+        """main._PLAN_LOCK must exist and be a threading.Lock."""
+        import sys
+        if "main" in sys.modules:
+            del sys.modules["main"]
+        import main as m
+        import threading
+        assert hasattr(m, "_PLAN_LOCK"), "main must expose _PLAN_LOCK"
+        assert isinstance(m._PLAN_LOCK, type(threading.Lock())), (
+            "_PLAN_LOCK must be a threading.Lock instance"
+        )
+
+    def test_second_plan_call_is_blocked_while_lock_held(self):
+        """
+        While _PLAN_LOCK is held (simulating an in-progress plan),
+        a second acquire must fail (non-blocking).
+        """
+        import sys
+        if "main" in sys.modules:
+            del sys.modules["main"]
+        import main as m
+
+        acquired = m._PLAN_LOCK.acquire(blocking=False)
+        assert acquired, "Lock should be acquirable when idle"
+
+        try:
+            second = m._PLAN_LOCK.acquire(blocking=False)
+            assert not second, (
+                "_PLAN_LOCK must reject a second caller while held. "
+                "Concurrent planning is not protected."
+            )
+        finally:
+            m._PLAN_LOCK.release()
+
+        # After release, must be acquirable again
+        third = m._PLAN_LOCK.acquire(blocking=False)
+        assert third, "Lock should be free after release"
+        m._PLAN_LOCK.release()
+
+
 class TestCredentialsFromEnv:
     """Verify auth credentials are read from environment variables."""
 
