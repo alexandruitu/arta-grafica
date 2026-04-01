@@ -11,10 +11,10 @@ export default function ComenziList() {
   const [expandedCP, setExpandedCP] = useState<number | null>(null);
   const [operatii, setOperatii] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [planningMap, setPlanningMap] = useState<Record<string, any>>({});
 
   const loadComenzi = async () => {
     setLoading(true);
-    // Load enough rows to compute accurate stats (up to 2000)
     const params: Record<string, string> = { limit: '2000' };
     if (search) params.search = search;
     if (statusFilter) params.status = statusFilter;
@@ -22,12 +22,16 @@ export default function ComenziList() {
     try {
       const data = await api.getComenzi(params);
       setComenzi(data);
-      setTotalCount(null); // reset — stats come from the loaded array
+      setTotalCount(null);
     } catch { setComenzi([]); }
     setLoading(false);
   };
 
   useEffect(() => { loadComenzi(); }, [statusFilter, stadiuFilter]);
+
+  useEffect(() => {
+    api.getPlanningByComanda().then(setPlanningMap).catch(() => {});
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,10 +39,7 @@ export default function ComenziList() {
   };
 
   const toggleExpand = async (cp: number) => {
-    if (expandedCP === cp) {
-      setExpandedCP(null);
-      return;
-    }
+    if (expandedCP === cp) { setExpandedCP(null); return; }
     setExpandedCP(cp);
     try {
       const ops = await api.getComandaOperatii(cp);
@@ -56,12 +57,30 @@ export default function ComenziList() {
     return 'bg-slate-100 text-slate-600';
   };
 
-  // Compute stats live from the loaded (filtered) array
+  const statusPlanificareColor = (status: string) => {
+    const map: Record<string, string> = {
+      'Planificat': 'bg-green-100 text-green-700',
+      'Previzionat': 'bg-blue-100 text-blue-700',
+      'Partial': 'bg-cyan-100 text-cyan-700',
+      'Blocat': 'bg-red-100 text-red-700',
+    };
+    return map[status] || 'bg-slate-100 text-slate-600';
+  };
+
+  const statusMaterialColor = (status: string) => {
+    const map: Record<string, string> = {
+      'Disponibil': 'bg-green-100 text-green-700',
+      'In aprovizionare': 'bg-orange-100 text-orange-700',
+      'Lipsa': 'bg-red-100 text-red-700',
+    };
+    return map[status] || 'bg-slate-100 text-slate-600';
+  };
+
   const liveStats = useMemo(() => ({
-    total:   comenzi.length,
+    total:    comenzi.length,
     stadiu06: comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
-    liber:   comenzi.filter(c => c.status_cda === 'LIBER').length,
-    stop:    comenzi.filter(c => c.status_cda === 'STOP').length,
+    liber:    comenzi.filter(c => c.status_cda === 'LIBER').length,
+    stop:     comenzi.filter(c => c.status_cda === 'STOP').length,
   }), [comenzi]);
 
   const hasFilter = !!(search || statusFilter || stadiuFilter);
@@ -99,7 +118,6 @@ export default function ComenziList() {
 
   return (
     <div className="space-y-4">
-      {/* Overview cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {overviewCards.map(card => (
           <button
@@ -115,7 +133,6 @@ export default function ComenziList() {
         ))}
       </div>
 
-      {/* Search & filters */}
       <div className="flex gap-3 items-center">
         <form onSubmit={handleSearch} className="flex gap-2 flex-1">
           <div className="relative flex-1 max-w-md">
@@ -153,7 +170,6 @@ export default function ComenziList() {
 
       {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
 
-      {/* Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -169,94 +185,125 @@ export default function ComenziList() {
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Cant.</th>
                 <th className="px-3 py-2 text-left">Data Livrare</th>
+                <th className="px-3 py-2 text-left">Data Plan.</th>
+                <th className="px-3 py-2 text-left">Intarziere</th>
+                <th className="px-3 py-2 text-left">St. Plan.</th>
+                <th className="px-3 py-2 text-left">St. Material</th>
                 <th className="px-3 py-2 text-left">Plata</th>
               </tr>
             </thead>
             <tbody>
-              {comenzi.map(c => (
-                <>
-                  <tr
-                    key={c.cp}
-                    onClick={() => toggleExpand(c.cp)}
-                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
-                  >
-                    <td className="px-3 py-2">
-                      {expandedCP === c.cp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </td>
-                    <td className="px-3 py-2 font-mono font-medium">{c.cp || '-'}</td>
-                    <td className="px-3 py-2 font-mono">{c.cv || '-'}</td>
-                    <td className="px-3 py-2">{c.client}</td>
-                    <td className="px-3 py-2 max-w-[200px] truncate" title={c.articol}>{c.articol}</td>
-                    <td className="px-3 py-2">
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${c.tip_comanda === 'V' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {c.tip_comanda === 'V' ? 'Vanzare' : 'Productie'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={`px-2 py-0.5 rounded text-xs ${stadiuColor(c.stadiu_prepress)}`}>
-                        {c.stadiu_prepress || '-'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={`px-2 py-0.5 rounded text-xs ${c.status_cda === 'STOP' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                        {c.status_cda}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{c.cant_vnz}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{c.data_actualizata_livrare || c.dt_livr_prod || '-'}</td>
-                    <td className="px-3 py-2">
-                      {c.val_de_platit > 0 && c.val_platita >= c.val_de_platit ? (
-                        <span className="text-green-600 text-xs">Achitat</span>
-                      ) : c.val_de_platit > 0 ? (
-                        <span className="text-red-600 text-xs">Neachitat</span>
-                      ) : (
-                        <span className="text-slate-400 text-xs">-</span>
-                      )}
-                    </td>
-                  </tr>
-                  {expandedCP === c.cp && (
-                    <tr key={`ops-${c.cp}`}>
-                      <td colSpan={11} className="px-6 py-3 bg-slate-50">
-                        <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
-                        {operatii.length === 0 ? (
-                          <p className="text-xs text-slate-400">Nicio operatie gasita</p>
+              {comenzi.map(c => {
+                const ps = planningMap[String(c.cp)];
+                return (
+                  <>
+                    <tr
+                      key={c.cp}
+                      onClick={() => toggleExpand(c.cp)}
+                      className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <td className="px-3 py-2">
+                        {expandedCP === c.cp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </td>
+                      <td className="px-3 py-2 font-mono font-medium">{c.cp || '-'}</td>
+                      <td className="px-3 py-2 font-mono">{c.cv || '-'}</td>
+                      <td className="px-3 py-2">{c.client}</td>
+                      <td className="px-3 py-2 max-w-[200px] truncate" title={c.articol}>{c.articol}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${c.tip_comanda === 'V' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                          {c.tip_comanda === 'V' ? 'Vanzare' : 'Productie'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded text-xs ${stadiuColor(c.stadiu_prepress)}`}>
+                          {c.stadiu_prepress || '-'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded text-xs ${c.status_cda === 'STOP' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                          {c.status_cda}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">{c.cant_vnz}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{c.data_actualizata_livrare || c.dt_livr_prod || '-'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">
+                        {ps?.data_planificare || <span className="text-slate-400">-</span>}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">
+                        {ps?.intarziere_zile != null ? (
+                          <span className={ps.intarziere_zile > 0 ? 'text-red-600 font-medium' : 'text-green-600'}>
+                            {ps.intarziere_zile > 0 ? `+${ps.intarziere_zile}z` : `${ps.intarziere_zile}z`}
+                          </span>
+                        ) : <span className="text-slate-400">-</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {ps?.status_planificare ? (
+                          <span className={`px-2 py-0.5 rounded text-xs ${statusPlanificareColor(ps.status_planificare)}`}>
+                            {ps.status_planificare}
+                          </span>
+                        ) : <span className="text-slate-400 text-xs">-</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {ps?.status_material ? (
+                          <span className={`px-2 py-0.5 rounded text-xs ${statusMaterialColor(ps.status_material)}`}>
+                            {ps.status_material}
+                          </span>
+                        ) : <span className="text-slate-400 text-xs">-</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {c.val_de_platit > 0 && c.val_platita >= c.val_de_platit ? (
+                          <span className="text-green-600 text-xs">Achitat</span>
+                        ) : c.val_de_platit > 0 ? (
+                          <span className="text-red-600 text-xs">Neachitat</span>
                         ) : (
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-slate-500">
-                                <th className="text-left py-1">CL</th>
-                                <th className="text-left py-1">OP</th>
-                                <th className="text-left py-1">Descriere</th>
-                                <th className="text-right py-1">Comandat</th>
-                                <th className="text-right py-1">Q Plan</th>
-                                <th className="text-right py-1">P Setup</th>
-                                <th className="text-right py-1">P Runtime</th>
-                                <th className="text-right py-1">R Runtime</th>
-                                <th className="text-right py-1">Rest</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {operatii.map((op: any, i: number) => (
-                                <tr key={i} className="border-t border-slate-200">
-                                  <td className="py-1">{op.cl}</td>
-                                  <td className="py-1 font-mono">{op.op}</td>
-                                  <td className="py-1">{op.descr_op}</td>
-                                  <td className="py-1 text-right">{op.comandat}</td>
-                                  <td className="py-1 text-right">{op.q_plan}</td>
-                                  <td className="py-1 text-right">{op.p_setup}</td>
-                                  <td className="py-1 text-right">{op.p_runtime}</td>
-                                  <td className="py-1 text-right">{op.r_runtime}</td>
-                                  <td className="py-1 text-right font-medium">{op.q_rest}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          <span className="text-slate-400 text-xs">-</span>
                         )}
                       </td>
                     </tr>
-                  )}
-                </>
-              ))}
+                    {expandedCP === c.cp && (
+                      <tr key={`ops-${c.cp}`}>
+                        <td colSpan={15} className="px-6 py-3 bg-slate-50">
+                          <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
+                          {operatii.length === 0 ? (
+                            <p className="text-xs text-slate-400">Nicio operatie gasita</p>
+                          ) : (
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-slate-500">
+                                  <th className="text-left py-1">CL</th>
+                                  <th className="text-left py-1">OP</th>
+                                  <th className="text-left py-1">Descriere</th>
+                                  <th className="text-right py-1">Comandat</th>
+                                  <th className="text-right py-1">Q Plan</th>
+                                  <th className="text-right py-1">P Setup</th>
+                                  <th className="text-right py-1">P Runtime</th>
+                                  <th className="text-right py-1">R Runtime</th>
+                                  <th className="text-right py-1">Rest</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {operatii.map((op: any, i: number) => (
+                                  <tr key={i} className="border-t border-slate-200">
+                                    <td className="py-1">{op.cl}</td>
+                                    <td className="py-1 font-mono">{op.op}</td>
+                                    <td className="py-1">{op.descr_op}</td>
+                                    <td className="py-1 text-right">{op.comandat}</td>
+                                    <td className="py-1 text-right">{op.q_plan}</td>
+                                    <td className="py-1 text-right">{op.p_setup}</td>
+                                    <td className="py-1 text-right">{op.p_runtime}</td>
+                                    <td className="py-1 text-right">{op.r_runtime}</td>
+                                    <td className="py-1 text-right font-medium">{op.q_rest}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>

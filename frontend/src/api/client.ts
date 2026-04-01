@@ -108,6 +108,7 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<any[]>(`/planificare/operatii${qs}`);
   },
+  getPlanningByComanda: () => request<Record<string, any>>('/planificare/by-comanda'),
 
   // Stoc
   getStoc: (search?: string) => {

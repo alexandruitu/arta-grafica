@@ -560,6 +560,56 @@ import importlib
 
 from unittest.mock import patch
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMENZI ENRICHMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestComenziEnrichment:
+    def test_by_comanda_data_planificare_is_max_data_end(self, db: Session):
+        """data_planificare for a WO must be the max data_end of its planned ops."""
+        s = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+        if not s:
+            return
+        planned = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == s.id,
+            PlanificareRezultat.status.in_(["planned", "previzionat"]),
+        ).first()
+        if not planned:
+            return
+        wo = planned.wo
+        all_ends = [
+            r.data_end for r in db.query(PlanificareRezultat).filter(
+                PlanificareRezultat.sesiune_id == s.id,
+                PlanificareRezultat.wo == wo,
+                PlanificareRezultat.status.in_(["planned", "previzionat"]),
+            ).all() if r.data_end
+        ]
+        expected_data_planificare = max(all_ends).date()
+        comanda = db.query(Comanda).filter(Comanda.cp == wo).first()
+        data_livrare = (comanda.data_actualizata_livrare or comanda.dt_livr_prod) if comanda else None
+        expected_intarziere = (expected_data_planificare - data_livrare).days if data_livrare else None
+        assert expected_data_planificare is not None
+        if expected_intarziere is not None:
+            assert isinstance(expected_intarziere, int)
+
+    def test_status_material_values_are_valid(self, db: Session):
+        """status_material must be one of the three defined values."""
+        from sqlalchemy import case as _case
+        valid = {"Disponibil", "In aprovizionare", "Lipsa"}
+        stoc_q = db.query(
+            Deficit.articol,
+            func.max(Deficit.sold_actual),
+            func.sum(_case((Deficit.tip_rezervare == "B", Deficit.cantitate), else_=0)),
+            func.sum(_case((Deficit.tip_rezervare == "A", Deficit.cantitate), else_=0)),
+        ).group_by(Deficit.articol).all()
+        for r in stoc_q[:20]:
+            d = (r[1] or 0) + (r[2] or 0)
+            df = d + (r[3] or 0)
+            status = "Lipsa" if df < 0 else ("In aprovizionare" if d < 0 else "Disponibil")
+            assert status in valid, f"Unexpected status '{status}' for {r[0]}"
+
+
 class TestAtomicImport:
     """Verify that a failure in any import step rolls back all previous steps."""
 

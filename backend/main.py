@@ -443,6 +443,101 @@ def get_planning_results(
     return q.offset(offset).limit(limit).all()
 
 
+@app.get("/api/planificare/by-comanda")
+def get_planning_by_comanda(db: Session = Depends(get_db)):
+    """Per-WO planning summary keyed by WO string.
+    Note: status_material uses global (non-sequential) stock view — useful approximation."""
+    from datetime import date as _date
+
+    sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+    if not sesiune:
+        return {}
+
+    all_results = (
+        db.query(PlanificareRezultat)
+        .filter(PlanificareRezultat.sesiune_id == sesiune.id)
+        .all()
+    )
+    by_wo: dict = {}
+    for r in all_results:
+        by_wo.setdefault(r.wo, []).append(r)
+
+    wo_ids = set(by_wo.keys())
+    comanda_map = {
+        c.cp: c
+        for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()
+    }
+
+    # Global stock per article
+    stoc_q = db.query(
+        Deficit.articol,
+        func.max(Deficit.sold_actual).label("sold"),
+        func.sum(_case((Deficit.tip_rezervare == "B", Deficit.cantitate), else_=0)).label("rez"),
+        func.sum(_case((Deficit.tip_rezervare == "A", Deficit.cantitate), else_=0)).label("aprov"),
+    ).group_by(Deficit.articol).all()
+    global_stoc = {
+        r[0]: {
+            "disponibil": (r[1] or 0) + (r[2] or 0),
+            "disponibil_final": (r[1] or 0) + (r[2] or 0) + (r[3] or 0),
+        }
+        for r in stoc_q
+    }
+
+    # Articles needed per WO (B-type deficit records)
+    wo_arts_q = db.query(Deficit.pe_comanda, Deficit.articol).filter(
+        Deficit.tip_rezervare == "B"
+    ).all()
+    wo_articles: dict = {}
+    for pe_comanda, art in wo_arts_q:
+        if pe_comanda:
+            wo_articles.setdefault(str(pe_comanda), set()).add(art)
+
+    summaries: dict = {}
+    for wo, ops in by_wo.items():
+        planned_ends = [
+            r.data_end for r in ops
+            if r.status in ("planned", "previzionat") and r.data_end
+        ]
+        data_planificare = max(planned_ends).date() if planned_ends else None
+
+        comanda = comanda_map.get(wo)
+        data_livrare = (comanda.data_actualizata_livrare or comanda.dt_livr_prod) if comanda else None
+        intarziere_zile: Optional[int] = None
+        if data_planificare and data_livrare:
+            intarziere_zile = (data_planificare - data_livrare).days
+
+        statuses = {r.status for r in ops}
+        if statuses <= {"planned"}:
+            status_planificare = "Planificat"
+        elif "previzionat" in statuses and statuses <= {"planned", "previzionat"}:
+            status_planificare = "Previzionat"
+        elif statuses <= {"no_bt", "no_material", "no_resource", "blocked_by_rank"}:
+            status_planificare = "Blocat"
+        elif "planned" in statuses or "previzionat" in statuses:
+            status_planificare = "Partial"
+        else:
+            status_planificare = "Blocat"
+
+        articles_needed = wo_articles.get(str(wo), set())
+        status_material = "Disponibil"
+        for art in articles_needed:
+            s = global_stoc.get(art, {"disponibil": 0.0, "disponibil_final": 0.0})
+            if s["disponibil_final"] < 0:
+                status_material = "Lipsa"
+                break
+            elif s["disponibil"] < 0 and status_material == "Disponibil":
+                status_material = "In aprovizionare"
+
+        summaries[str(wo)] = {
+            "data_planificare": data_planificare.isoformat() if data_planificare else None,
+            "intarziere_zile": intarziere_zile,
+            "status_planificare": status_planificare,
+            "status_material": status_material,
+        }
+
+    return summaries
+
+
 # --- Stoc ---
 @app.get("/api/stoc", response_model=List[StocArticol])
 def get_stoc(

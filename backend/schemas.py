@@ -115,3 +115,10 @@ class StocArticol(BaseModel):
     total_aprovizionare: float
     disponibil: float
     disponibil_final: float
+
+
+class ComandaSummary(BaseModel):
+    data_planificare: Optional[str] = None   # ISO date string or None
+    intarziere_zile: Optional[int] = None    # positive=late, negative=early, None=unknown
+    status_planificare: str                  # "Planificat" | "Previzionat" | "Partial" | "Blocat"
+    status_material: str                     # "Disponibil" | "In aprovizionare" | "Lipsa"
