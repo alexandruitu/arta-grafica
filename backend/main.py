@@ -223,12 +223,41 @@ def get_gantt_data(
         q = q.filter(PlanificareRezultat.wo == wo)
 
     results = q.all()
+    if not results:
+        return []
+
+    # ── Bulk pre-load to eliminate N+1 ───────────────────────────────────────
+    wo_ids = {r.wo for r in results}
+    op_ids = {str(r.op) for r in results}
+
+    comanda_map: dict = {
+        c.cp: c
+        for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()
+    }
+    operatie_map: dict = {
+        o.cod: o
+        for o in db.query(Operatie).filter(Operatie.cod.in_(op_ids)).all()
+    }
+    # All planned ops for this session for the WOs in our result set (for dependency computation)
+    all_planned = (
+        db.query(PlanificareRezultat)
+        .filter(PlanificareRezultat.sesiune_id == sesiune.id)
+        .filter(PlanificareRezultat.status == "planned")
+        .filter(PlanificareRezultat.wo.in_(wo_ids))
+        .all()
+    )
+    # Index: wo → list[PlanificareRezultat]
+    planned_by_wo: dict = {}
+    for p in all_planned:
+        planned_by_wo.setdefault(p.wo, []).append(p)
+
+    # ── Build Gantt tasks ─────────────────────────────────────────────────────
     tasks = []
     for r in results:
         if not r.data_start or not r.data_end:
             continue
 
-        comanda = db.query(Comanda).filter(Comanda.cp == r.wo).first()
+        comanda = comanda_map.get(r.wo)
         custom_class = "bar-planned"
         if comanda:
             delivery = comanda.data_actualizata_livrare or comanda.dt_livr_prod
@@ -237,21 +266,14 @@ def get_gantt_data(
             elif r.frozen:
                 custom_class = "bar-frozen"
 
+        # Dependency computation using pre-loaded data
         deps = []
-        if r.dispatch:
-            op_catalog = db.query(Operatie).filter(Operatie.cod == str(r.op)).first()
-            if op_catalog and op_catalog.rank > 1:
-                prev_ops = (
-                    db.query(PlanificareRezultat)
-                    .filter(PlanificareRezultat.sesiune_id == sesiune.id)
-                    .filter(PlanificareRezultat.wo == r.wo)
-                    .filter(PlanificareRezultat.status == "planned")
-                    .all()
-                )
-                for p in prev_ops:
-                    p_cat = db.query(Operatie).filter(Operatie.cod == str(p.op)).first()
-                    if p_cat and p_cat.rank < op_catalog.rank:
-                        deps.append(f"{p.wo}-{p.op}")
+        op_catalog = operatie_map.get(str(r.op))
+        if op_catalog and op_catalog.rank > 1:
+            for p in planned_by_wo.get(r.wo, []):
+                p_cat = operatie_map.get(str(p.op))
+                if p_cat and p_cat.rank < op_catalog.rank:
+                    deps.append(f"{p.wo}-{p.op}")
 
         tasks.append(GanttTask(
             id=f"{r.wo}-{r.op}",
@@ -268,7 +290,6 @@ def get_gantt_data(
             status=r.status,
         ))
 
-    # Sort by WO then by planned start date so rank order is visible in Gantt rows
     tasks.sort(key=lambda t: (t.wo, t.start))
     return tasks
 
