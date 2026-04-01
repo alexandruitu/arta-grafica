@@ -814,14 +814,23 @@ _DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.isdir(_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(_DIST, "assets")), name="assets")
 
+    _DIST_REAL = os.path.realpath(_DIST)
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str):
-        """Catch-all: return index.html for SPA routing."""
-        file_path = os.path.join(_DIST, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
+        """Catch-all: return index.html for SPA routing. Guards against path traversal."""
+        _index = os.path.join(_DIST_REAL, "index.html")
+        candidate = os.path.realpath(os.path.join(_DIST_REAL, full_path))
+        # Block any path that escapes the dist directory
+        if not candidate.startswith(_DIST_REAL + os.sep) and candidate != _DIST_REAL:
+            return FileResponse(
+                _index,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
         return FileResponse(
-            os.path.join(_DIST, "index.html"),
+            _index,
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 

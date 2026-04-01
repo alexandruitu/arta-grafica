@@ -581,6 +581,48 @@ class TestAtomicImport:
         db.close()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. PATH TRAVERSAL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPathTraversal:
+    """Verify the SPA catch-all route cannot serve files outside frontend/dist."""
+
+    def test_traversal_path_returns_index_not_file(self):
+        """
+        A path with ../ traversal must NOT serve files outside dist/.
+        It should fall back to index.html (or 404), never expose arbitrary files.
+        """
+        import sys, os
+        # Ensure fresh import
+        if "main" in sys.modules:
+            del sys.modules["main"]
+
+        import main as m
+
+        # Only run if dist/ exists; otherwise the route isn't mounted
+        dist = os.path.join(os.path.dirname(m.__file__), "..", "frontend", "dist")
+        if not os.path.isdir(dist):
+            import pytest
+            pytest.skip("frontend/dist not built — SPA routes not mounted")
+
+        from fastapi.testclient import TestClient
+        client = TestClient(m.app, raise_server_exceptions=False)
+
+        # Attempt traversal to a file that definitely exists outside dist
+        # Use a path that would traverse up to backend/ and read main.py
+        resp = client.get(
+            "/../../../../backend/main.py",
+            headers={"Authorization": f"Bearer {m._VALID_TOKEN}"},
+        )
+        # If the traversal worked, we'd get 200 with Python source in the body.
+        # The fix should return the index.html instead (still 200, but SPA content).
+        if resp.status_code == 200:
+            assert "FastAPI" not in resp.text and "def " not in resp.text, (
+                "Path traversal succeeded — main.py source was served!"
+            )
+
+
 class TestCredentialsFromEnv:
     """Verify auth credentials are read from environment variables."""
 
