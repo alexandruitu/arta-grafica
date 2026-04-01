@@ -588,39 +588,94 @@ class TestAtomicImport:
 class TestPathTraversal:
     """Verify the SPA catch-all route cannot serve files outside frontend/dist."""
 
-    def test_traversal_path_returns_index_not_file(self):
+    def _make_fake_dist(self, tmp_path):
+        """Create a minimal fake dist/ directory for testing."""
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "assets").mkdir()
+        (dist / "index.html").write_text("<html><body>SPA</body></html>")
+        (dist / "about.html").write_text("<html><body>About</body></html>")
+        return str(dist)
+
+    def test_traversal_path_falls_back_to_index(self, tmp_path):
         """
         A path with ../ traversal must NOT serve files outside dist/.
-        It should fall back to index.html (or 404), never expose arbitrary files.
+        It should fall back to index.html instead.
         """
-        import sys, os
-        # Ensure fresh import
+        import sys, os, types
+        import importlib
+
+        dist = self._make_fake_dist(tmp_path)
+
+        # Also create a file OUTSIDE dist to attempt to serve
+        secret = tmp_path / "secret.txt"
+        secret.write_text("SECRET_CONTENT")
+
+        # Patch _DIST to our fake dist, reload app
         if "main" in sys.modules:
             del sys.modules["main"]
 
+        with __import__("unittest.mock", fromlist=["patch"]).patch(
+            "os.path.isdir", side_effect=lambda p: True if p == dist else os.path.isdir.__wrapped__(p) if hasattr(os.path.isdir, "__wrapped__") else True
+        ):
+            pass  # Don't use this approach
+
+        # Simpler: monkeypatch _DIST directly after import
+        if "main" in sys.modules:
+            del sys.modules["main"]
         import main as m
 
-        # Only run if dist/ exists; otherwise the route isn't mounted
-        dist = os.path.join(os.path.dirname(m.__file__), "..", "frontend", "dist")
-        if not os.path.isdir(dist):
+        original_dist_real = m._DIST_REAL if hasattr(m, "_DIST_REAL") else None
+
+        # Only test if the route is mounted (dist exists in real deployment)
+        import os
+        real_dist = os.path.join(os.path.dirname(m.__file__), "..", "frontend", "dist")
+        if not os.path.isdir(real_dist):
             import pytest
             pytest.skip("frontend/dist not built — SPA routes not mounted")
 
         from fastapi.testclient import TestClient
         client = TestClient(m.app, raise_server_exceptions=False)
 
-        # Attempt traversal to a file that definitely exists outside dist
-        # Use a path that would traverse up to backend/ and read main.py
+        # Attempt traversal to backend/main.py
         resp = client.get(
             "/../../../../backend/main.py",
             headers={"Authorization": f"Bearer {m._VALID_TOKEN}"},
         )
-        # If the traversal worked, we'd get 200 with Python source in the body.
-        # The fix should return the index.html instead (still 200, but SPA content).
-        if resp.status_code == 200:
-            assert "FastAPI" not in resp.text and "def " not in resp.text, (
-                "Path traversal succeeded — main.py source was served!"
-            )
+        assert resp.status_code == 200
+        # Must be index.html content, not Python source
+        assert "def " not in resp.text and "FastAPI" not in resp.text, (
+            "Path traversal succeeded — Python source was served!"
+        )
+        # Must be the SPA index page
+        assert resp.headers.get("content-type", "").startswith("text/html"), (
+            "Expected index.html (text/html) but got different content-type"
+        )
+
+    def test_normal_file_in_dist_is_served(self):
+        """Legitimate files inside dist/ must still be served correctly."""
+        import sys, os
+        if "main" in sys.modules:
+            del sys.modules["main"]
+        import main as m
+
+        real_dist = os.path.join(os.path.dirname(m.__file__), "..", "frontend", "dist")
+        if not os.path.isdir(real_dist):
+            import pytest
+            pytest.skip("frontend/dist not built — SPA routes not mounted")
+
+        from fastapi.testclient import TestClient
+        client = TestClient(m.app, raise_server_exceptions=False)
+
+        # Request index.html directly (always exists in a built SPA)
+        resp = client.get(
+            "/index.html",
+            headers={"Authorization": f"Bearer {m._VALID_TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", ""), (
+            "index.html should be served as text/html"
+        )
 
 
 class TestCredentialsFromEnv:
