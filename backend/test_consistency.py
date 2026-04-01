@@ -516,6 +516,71 @@ class TestCrossTabConsistency:
 
 import importlib
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. ATOMIC IMPORT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from unittest.mock import patch
+
+class TestAtomicImport:
+    """Verify that a failure in any import step rolls back all previous steps."""
+
+    def _make_db(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from database import Base
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=engine)
+        Session = sessionmaker(bind=engine)
+        return Session()
+
+    def test_failure_in_step3_rolls_back_steps1_and_2(self):
+        """
+        import_all: if import_operatii raises, Comanda rows inserted by step 1
+        must NOT be visible in the DB after the failure.
+        """
+        from models import Comanda
+        from importer import import_all
+
+        db = self._make_db()
+
+        def fake_import_comenzi(db, path):
+            db.add(Comanda(
+                cp=9999, cv=9999, client="Atomic Test",
+                cant_vnz=1, livrat=0, status_cda="LIBER",
+            ))
+            return 1
+
+        def fake_import_dispatch(db, path):
+            return 0
+
+        def fake_import_operatii(db, path):
+            raise RuntimeError("Simulated failure in step 3")
+
+        def fake_import_deficite(db, path):
+            return 0
+
+        def fake_import_resurse(db, path):
+            return 0
+
+        with patch("importer.import_comenzi", fake_import_comenzi), \
+             patch("importer.import_dispatch", fake_import_dispatch), \
+             patch("importer.import_operatii", fake_import_operatii), \
+             patch("importer.import_deficite", fake_import_deficite), \
+             patch("importer.import_resurse", fake_import_resurse):
+            try:
+                import_all(db, "/fake/data/dir")
+            except RuntimeError:
+                pass  # expected
+
+        count = db.query(Comanda).filter(Comanda.cp == 9999).count()
+        assert count == 0, (
+            f"Expected 0 Comanda rows after rollback, got {count}. "
+            "The import is not atomic — partial data was committed."
+        )
+        db.close()
+
+
 class TestCredentialsFromEnv:
     """Verify auth credentials are read from environment variables."""
 

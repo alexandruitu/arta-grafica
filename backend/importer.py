@@ -103,7 +103,7 @@ def import_comenzi(db: Session, filepath: str):
             ref_client=safe_str(row.get("RefClient")),
         )
         db.add(comanda)
-    db.commit()
+    db.flush()
     return len(df)
 
 
@@ -137,7 +137,7 @@ def import_dispatch(db: Session, filepath: str):
             data_actualizare_livrare=safe_date(row.get("DataActualizareLivrare")),
         )
         db.add(item)
-    db.commit()
+    db.flush()
     return len(df)
 
 
@@ -166,7 +166,7 @@ def import_operatii(db: Session, filepath: str):
         )
         db.add(op)
         count += 1
-    db.commit()
+    db.flush()
     return count
 
 
@@ -188,7 +188,7 @@ def import_deficite(db: Session, filepath: str):
             tip_rezervare=safe_str(row.get("TipRezervare")),
         )
         db.add(d)
-    db.commit()
+    db.flush()
     return len(df)
 
 
@@ -234,16 +234,21 @@ def import_resurse(db: Session, filepath: str):
             )
             db.add(prog)
 
-    db.commit()
+    db.flush()
     return len(df)
 
 
 def import_all(db: Session, data_dir: str):
     import os
     results = {}
-    results["comenzi"] = import_comenzi(db, os.path.join(data_dir, "Stari comenzi_AS.xlsx"))
-    results["dispatch"] = import_dispatch(db, os.path.join(data_dir, "Dispatch List_AS.xlsx"))
-    results["operatii"] = import_operatii(db, os.path.join(data_dir, "OperatiiWO_AS.xlsx"))
-    results["deficite"] = import_deficite(db, os.path.join(data_dir, "Lista Deficite_AS.xlsx"))
-    results["resurse"] = import_resurse(db, os.path.join(data_dir, "Resurse_AS.xlsx"))
+    try:
+        results["comenzi"]  = import_comenzi(db, os.path.join(data_dir, "Stari comenzi_AS.xlsx"))
+        results["dispatch"] = import_dispatch(db, os.path.join(data_dir, "Dispatch List_AS.xlsx"))
+        results["operatii"] = import_operatii(db, os.path.join(data_dir, "OperatiiWO_AS.xlsx"))
+        results["deficite"] = import_deficite(db, os.path.join(data_dir, "Lista Deficite_AS.xlsx"))
+        results["resurse"]  = import_resurse(db, os.path.join(data_dir, "Resurse_AS.xlsx"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return results
