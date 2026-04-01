@@ -108,6 +108,7 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<any[]>(`/planificare/operatii${qs}`);
   },
+  getPlanningStats: () => request<Record<string, number>>('/planificare/stats'),
   getPlanningByComanda: () => request<Record<string, any>>('/planificare/by-comanda'),
   toggleFrozen: (resultId: number, frozen: boolean) =>
     request<{ id: number; frozen: boolean; status: string }>(

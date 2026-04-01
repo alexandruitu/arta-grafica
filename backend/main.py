@@ -443,6 +443,32 @@ def get_planning_results(
     return q.offset(offset).limit(limit).all()
 
 
+@app.get("/api/planificare/stats")
+def get_planning_stats(db: Session = Depends(get_db)):
+    """Returns per-status counts for the latest planning session."""
+    sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+    if not sesiune:
+        return {"total": 0, "planned": 0, "previzionat": 0, "no_material": 0,
+                "no_bt": 0, "blocked_by_rank": 0, "no_resource": 0}
+    rows = (
+        db.query(PlanificareRezultat.status, func.count(PlanificareRezultat.id))
+        .filter(PlanificareRezultat.sesiune_id == sesiune.id)
+        .group_by(PlanificareRezultat.status)
+        .all()
+    )
+    counts = {status: cnt for status, cnt in rows}
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "planned": counts.get("planned", 0),
+        "previzionat": counts.get("previzionat", 0),
+        "no_material": counts.get("no_material", 0),
+        "no_bt": counts.get("no_bt", 0),
+        "blocked_by_rank": counts.get("blocked_by_rank", 0),
+        "no_resource": counts.get("no_resource", 0),
+    }
+
+
 @app.get("/api/planificare/by-comanda", response_model=Dict[str, ComandaSummary])
 def get_planning_by_comanda(db: Session = Depends(get_db)):
     """Per-WO planning summary keyed by WO string.

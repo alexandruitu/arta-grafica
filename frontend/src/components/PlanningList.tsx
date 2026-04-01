@@ -8,9 +8,11 @@ export default function PlanningList() {
   const [selectedCL, setSelectedCL] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
   const [loading, setLoading] = useState(false);
+  const [serverStats, setServerStats] = useState<Record<string, number>>({});
 
   useEffect(() => {
     api.getCentreLucru().then(setCentreLucru).catch(() => {});
+    api.getPlanningStats().then(setServerStats).catch(() => {});
   }, []);
 
   const loadResults = async () => {
@@ -21,27 +23,31 @@ export default function PlanningList() {
     try {
       const data = await api.getPlanningOperatii(params);
       setResults(data);
+      // Refresh server stats after any load (in case planning was re-run)
+      api.getPlanningStats().then(setServerStats).catch(() => {});
     } catch { setResults([]); }
     setLoading(false);
   };
 
   useEffect(() => { loadResults(); }, [selectedCL, selectedStatus]);
 
-  const stats = useMemo(() => {
-    const planned        = results.filter(r => r.status === 'planned');
-    const plannedOrPrev  = results.filter(r => r.status === 'planned' || r.status === 'previzionat');
-    const oreTotal       = plannedOrPrev.reduce((s, r) => s + (r.durata_ore || 0), 0);
-    return {
-      total:        results.length,
-      planned:      planned.length,
-      previzionat:  results.filter(r => r.status === 'previzionat').length,
-      no_material:  results.filter(r => r.status === 'no_material').length,
-      blocked:      results.filter(r => r.status === 'blocked_by_rank').length,
-      no_bt:        results.filter(r => r.status === 'no_bt').length,
-      no_resource:  results.filter(r => r.status === 'no_resource').length,
-      ore:          oreTotal,
-    };
+  const oreTotal = useMemo(() => {
+    return results
+      .filter(r => r.status === 'planned' || r.status === 'previzionat')
+      .reduce((s, r) => s + (r.durata_ore || 0), 0);
   }, [results]);
+
+  // Stats from server (accurate totals), with ore from loaded results
+  const stats = {
+    total:       serverStats.total        ?? results.length,
+    planned:     serverStats.planned      ?? 0,
+    previzionat: serverStats.previzionat  ?? 0,
+    no_material: serverStats.no_material  ?? 0,
+    blocked:     serverStats.blocked_by_rank ?? 0,
+    no_bt:       serverStats.no_bt        ?? 0,
+    no_resource: serverStats.no_resource  ?? 0,
+    ore:         oreTotal,
+  };
 
   const handleToggleFrozen = async (id: number, currentFrozen: boolean) => {
     try {
