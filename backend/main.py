@@ -266,7 +266,10 @@ def get_gantt_data(
             elif r.frozen:
                 custom_class = "bar-frozen"
 
-        # Dependency computation using pre-loaded data
+        # Dependency computation using pre-loaded data.
+        # Note: the original code guarded this on `r.dispatch` (non-null FK).
+        # All planned rows always have dispatch_id set by the planner, so the
+        # guard is unnecessary. Missing ops in operatie_map simply skip deps.
         deps = []
         op_catalog = operatie_map.get(str(r.op))
         if op_catalog and op_catalog.rank > 1:
@@ -290,6 +293,7 @@ def get_gantt_data(
             status=r.status,
         ))
 
+    # Sort by WO then by planned start date so rank order is visible in Gantt rows
     tasks.sort(key=lambda t: (t.wo, t.start))
     return tasks
 
