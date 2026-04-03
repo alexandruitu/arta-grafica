@@ -26,7 +26,7 @@ export default function GanttView() {
   const [centreLucru, setCentreLucru] = useState<any[]>([]);
   const [selectedCL, setSelectedCL] = useState('');
   const [searchWO, setSearchWO] = useState('');
-  const [viewMode, setViewMode] = useState('Day');
+  const [viewMode, setViewMode] = useState('Half Day');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -144,7 +144,7 @@ export default function GanttView() {
         />
 
         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-          {['Day', 'Week', 'Month'].map(mode => (
+          {['Half Day', 'Day', 'Week', 'Month'].map(mode => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
