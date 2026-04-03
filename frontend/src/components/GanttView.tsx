@@ -67,7 +67,7 @@ export default function GanttView() {
     try {
       ganttRef.current = new Gantt(containerRef.current, ganttTasks, {
         view_mode: viewMode as any,
-        date_format: 'YYYY-MM-DD',
+        date_format: 'YYYY-MM-DD HH:mm',
         bar_height: 24,
         bar_corner_radius: 3,
         padding: 14,

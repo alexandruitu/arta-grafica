@@ -292,8 +292,8 @@ def get_gantt_data(
         tasks.append(GanttTask(
             id=f"{r.wo}-{r.op}",
             name=f"WO:{r.wo} OP:{r.op} ({r.cl})",
-            start=r.data_start.strftime("%Y-%m-%d"),
-            end=r.data_end.strftime("%Y-%m-%d"),
+            start=r.data_start.strftime("%Y-%m-%d %H:%M"),
+            end=r.data_end.strftime("%Y-%m-%d %H:%M"),
             progress=0,
             dependencies=",".join(deps),
             custom_class=custom_class,

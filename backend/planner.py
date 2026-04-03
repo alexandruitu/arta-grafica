@@ -37,6 +37,9 @@ STADIU_PRIORITY = {
 
 INVALID_BT_DATE = "1911-11-11"
 
+SHIFT_START_H = 6   # 06:00 shift start
+SHIFT_END_H = 22    # 22:00 shift end
+
 
 def get_stadiu_priority(stadiu: str | None) -> int:
     if not stadiu:
@@ -70,50 +73,82 @@ def calc_remaining_time(disp: DispatchItem) -> float:
     return max(0.0, disp.p_setup + disp.p_runtime - disp.r_runtime)
 
 
-def find_slot(
+def find_slot_precise(
     resursa_id: int,
     disponibilitate: dict,
+    next_free_time: dict,
     hours_needed: float,
-    earliest_start: date,
-) -> tuple[date | None, date | None, float]:
+    earliest_start: datetime,
+) -> tuple[datetime | None, datetime | None]:
     """
-    Find the first contiguous (calendar) block of availability starting from
-    earliest_start that can accommodate hours_needed.
+    Find when a resource can fit hours_needed, respecting shift bounds (6-22).
 
-    Returns (slot_start, slot_end, hours_used_on_last_day).
-    slot_start / slot_end are dates.
-    hours_used_on_last_day is needed to compute the exact end time.
+    Uses next_free_time[resursa_id] to know when the resource is next free
+    (hour-level precision). disponibilitate is used read-only to check
+    whether a date is a working day.
+
+    Returns (slot_start, slot_end) as datetimes, or (None, None) if no slot
+    found within 730 days.
+
+    Updates next_free_time[resursa_id] = slot_end on success.
     """
+    candidate = max(earliest_start, next_free_time.get(resursa_id, earliest_start))
+
+    slot_start: datetime | None = None
+    slot_end: datetime | None = None
     hours_remaining = hours_needed
-    slot_start = None
-    slot_end = None
-    hours_used_on_last_day = 0.0
 
-    for day_offset in range(730):  # Search up to 2 years
-        check_date = earliest_start + timedelta(days=day_offset)
-        avail = disponibilitate[resursa_id].get(check_date, 0.0)
+    for day_offset in range(730):
+        check_date = candidate.date() + timedelta(days=day_offset)
 
-        if avail <= 0:
+        # Check if this is a working day for this resource
+        if disponibilitate[resursa_id].get(check_date, 0.0) <= 0:
+            continue
+
+        # Determine start time on this day (in fractional hours)
+        if day_offset == 0:
+            start_h = candidate.hour + candidate.minute / 60.0
+            start_h = max(start_h, float(SHIFT_START_H))
+        else:
+            start_h = float(SHIFT_START_H)
+
+        hours_available = float(SHIFT_END_H) - start_h
+        if hours_available <= 0:
+            # Past shift end on candidate's date; next day will use SHIFT_START_H
             continue
 
         if slot_start is None:
-            slot_start = check_date
+            start_hour = int(start_h)
+            start_minute = round((start_h - start_hour) * 60)
+            slot_start = datetime(
+                check_date.year, check_date.month, check_date.day,
+                start_hour, start_minute,
+            )
 
-        if avail >= hours_remaining:
-            disponibilitate[resursa_id][check_date] -= hours_remaining
-            hours_used_on_last_day = hours_remaining
-            slot_end = check_date
+        if hours_available >= hours_remaining:
+            end_h = start_h + hours_remaining
+            end_hour = int(end_h)
+            end_minute = round((end_h - end_hour) * 60)
+            if end_minute >= 60:
+                end_hour += 1
+                end_minute = 0
+            slot_end = datetime(
+                check_date.year, check_date.month, check_date.day,
+                end_hour, end_minute,
+            )
             hours_remaining = 0.0
             break
         else:
-            hours_remaining -= avail
-            hours_used_on_last_day = avail
-            disponibilitate[resursa_id][check_date] = 0.0
-            slot_end = check_date
+            hours_remaining -= hours_available
+            slot_end = datetime(
+                check_date.year, check_date.month, check_date.day,
+                SHIFT_END_H, 0,
+            )
 
-    if hours_remaining <= 0.0 and slot_start and slot_end:
-        return slot_start, slot_end, hours_used_on_last_day
-    return None, None, 0.0
+    if hours_remaining <= 0.0 and slot_start is not None and slot_end is not None:
+        next_free_time[resursa_id] = slot_end
+        return slot_start, slot_end
+    return None, None
 
 
 def run_planning(db: Session) -> dict:
@@ -164,24 +199,21 @@ def run_planning(db: Session) -> dict:
     for r in resurse:
         resurse_by_cl[r.cl].append(r)
 
-    # disponibilitate[resursa_id][date] = ore_ramase  (decremented as ops are placed)
+    # disponibilitate[resursa_id][date] = ore_disponibile
+    # Used read-only to check whether a date is a working day for a resource.
     disponibilitate: dict[int, dict[date, float]] = defaultdict(lambda: defaultdict(float))
     for prog in db.query(ProgramResursa).all():
         disponibilitate[prog.resursa_id][prog.data] = prog.ore_disponibile
 
-    # Pre-allocate resource hours for frozen operations
+    # next_free_time[resursa_id] = datetime when resource next becomes free
+    next_free_time: dict[int, datetime] = {}
+
+    # Pre-populate next_free_time from frozen operations
     for fr in frozen_ops.values():
-        if fr.resursa_id and fr.data_start and fr.data_end and fr.durata_ore > 0:
-            hours_left = fr.durata_ore
-            day = fr.data_start.date()
-            end_day = fr.data_end.date()
-            while hours_left > 0 and day <= end_day:
-                avail = disponibilitate[fr.resursa_id].get(day, 0.0)
-                if avail > 0:
-                    consumed = min(avail, hours_left)
-                    disponibilitate[fr.resursa_id][day] -= consumed
-                    hours_left -= consumed
-                day += timedelta(days=1)
+        if fr.resursa_id and fr.data_end:
+            existing = next_free_time.get(fr.resursa_id)
+            if existing is None or fr.data_end > existing:
+                next_free_time[fr.resursa_id] = fr.data_end
 
     # ── Step 4: Build material stock tracker ─────────────────────────────────
     # stoc_tracker[articol] = available quantity (updated as WOs are reserved)
@@ -230,6 +262,7 @@ def run_planning(db: Session) -> dict:
         "completed": 0,
     }
     today = date.today()
+    today_dt = datetime(today.year, today.month, today.day, SHIFT_START_H)
 
     for comanda in comenzi:
         dispatch_items = (
@@ -296,7 +329,7 @@ def run_planning(db: Session) -> dict:
 
         # ── Per-WO rank tracking ──────────────────────────────────────────────
         # rank_status[rank] = "completed" | "planned" | "previzionat" | "open"
-        # rank_end_date[rank] = date when this rank's operation is expected to finish
+        # rank_end_date[rank] = datetime when this rank's operation is expected to finish
         #                        (used to set earliest_start for successor ranks)
         #
         # IMPORTANT: Multiple ops can share the same rank.  We must keep the
@@ -304,21 +337,21 @@ def run_planning(db: Session) -> dict:
         # keep the LATEST end-date among all planned ops at a rank so that
         # successor ranks start after ALL predecessors finish.
         rank_status: dict[int, str] = {}
-        rank_end_date: dict[int, date] = {}
+        rank_end_date: dict[int, datetime] = {}
 
         # Priority: open=2, planned/previzionat=1, completed=0  (higher = more restrictive)
         _STATUS_PRIO = {"completed": 0, "planned": 1, "previzionat": 1, "open": 2}
 
-        def update_rank(rank: int, new_status: str, end_date: date | None = None):
+        def update_rank(rank: int, new_status: str, end_dt: datetime | None = None):
             """Update rank tracking, keeping the most restrictive status."""
             old_prio = _STATUS_PRIO.get(rank_status.get(rank, ""), -1)
             new_prio = _STATUS_PRIO[new_status]
             if new_prio >= old_prio:
                 rank_status[rank] = new_status
-            if end_date is not None:
-                # Keep latest end-date among planned ops at this rank
-                if rank not in rank_end_date or end_date > rank_end_date[rank]:
-                    rank_end_date[rank] = end_date
+            if end_dt is not None:
+                # Keep latest end-datetime among planned ops at this rank
+                if rank not in rank_end_date or end_dt > rank_end_date[rank]:
+                    rank_end_date[rank] = end_dt
 
         for disp in dispatch_items:
             # ── Frozen: carry from previous session unchanged ─────────────────
@@ -336,7 +369,7 @@ def run_planning(db: Session) -> dict:
                 ))
                 stats[fr.status] += 1
                 frozen_rank = get_rank(disp)
-                update_rank(frozen_rank, fr.status, fr.data_end.date() if fr.data_end else None)
+                update_rank(frozen_rank, fr.status, fr.data_end if fr.data_end else None)
                 continue
 
             remaining = calc_remaining_time(disp)
@@ -368,9 +401,13 @@ def run_planning(db: Session) -> dict:
             # - predecessor "planned"/"previzionat" → OK, but start AFTER predecessor ends
             # - predecessor "completed" → no constraint
             blocked = False
-            earliest_start = today
+            earliest_start = today_dt
             if wo_previzionat_start:
-                earliest_start = max(earliest_start, wo_previzionat_start)
+                previz_dt = datetime(
+                    wo_previzionat_start.year, wo_previzionat_start.month,
+                    wo_previzionat_start.day, SHIFT_START_H,
+                )
+                earliest_start = max(earliest_start, previz_dt)
             for prev_rank, prev_status in rank_status.items():
                 if prev_rank >= rank:
                     continue
@@ -378,10 +415,10 @@ def run_planning(db: Session) -> dict:
                     blocked = True
                     break
                 if prev_status in ("planned", "previzionat") and prev_rank in rank_end_date:
-                    # Must start the day after predecessor finishes
+                    # Must start after predecessor finishes (hour precision)
                     earliest_start = max(
                         earliest_start,
-                        rank_end_date[prev_rank] + timedelta(days=1),
+                        rank_end_date[prev_rank],
                     )
 
             if blocked:
@@ -407,28 +444,22 @@ def run_planning(db: Session) -> dict:
                 if not resursa_operatii.get(r.id) or op_code in resursa_operatii[r.id]
             ]
 
-            # Pick first valid resource with an available slot starting from earliest_start
-            # find_slot modifies disponibilitate in-place, so we stop at first success
+            # Pick first valid resource with an available slot starting from earliest_start.
+            # find_slot_precise updates next_free_time in-place on success.
             allocated = False
             for r in valid_resurse:
-                slot_start, slot_end, hours_last_day = find_slot(
-                    r.id, disponibilitate, remaining, earliest_start
+                slot_start, slot_end = find_slot_precise(
+                    r.id, disponibilitate, next_free_time, remaining, earliest_start
                 )
                 if slot_start is None:
                     continue  # no room on this resource, try next
-
-                # Use date-only boundaries (exclusive end = next day after last working day).
-                # This ensures frappe-gantt Day-view bars are at least 1 column wide
-                # and that chained operations on consecutive days are visually separated.
-                data_start = datetime.combine(slot_start, datetime.min.time())
-                data_end   = datetime.combine(slot_end + timedelta(days=1), datetime.min.time())
 
                 final_status = "previzionat" if wo_previzionat_start is not None else "planned"
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id, dispatch_id=disp.id,
                     wo=disp.wo, op=disp.op, cl=disp.cl,
                     resursa_id=r.id, resursa_nume=r.resursa,
-                    data_start=data_start, data_end=data_end,
+                    data_start=slot_start, data_end=slot_end,
                     durata_ore=remaining,
                     status=final_status, motiv=None,
                 ))
