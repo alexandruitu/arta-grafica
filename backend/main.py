@@ -278,16 +278,36 @@ def get_gantt_data(
                 custom_class = "bar-frozen"
 
         # Dependency computation using pre-loaded data.
-        # Note: the original code guarded this on `r.dispatch` (non-null FK).
-        # All planned rows always have dispatch_id set by the planner, so the
-        # guard is unnecessary. Missing ops in operatie_map simply skip deps.
         deps = []
         op_catalog = operatie_map.get(str(r.op))
-        if op_catalog and op_catalog.rank > 1:
-            for p in planned_by_wo.get(r.wo, []):
-                p_cat = operatie_map.get(str(p.op))
-                if p_cat and p_cat.rank < op_catalog.rank:
-                    deps.append(f"{p.wo}-{p.op}")
+        my_rank = op_catalog.rank if op_catalog else 999
+
+        wo_ops = [p for p in planned_by_wo.get(r.wo, []) if p.op != r.op and p.data_start]
+
+        # Same-resource predecessor: among ops on the same resource that finish
+        # at or before this op's start, pick the one that ends latest.
+        # This captures sequential chaining on the same machine regardless of rank.
+        if r.resursa_id and r.data_start:
+            same_res = [
+                p for p in wo_ops
+                if p.resursa_id == r.resursa_id and p.data_end and p.data_end <= r.data_start
+            ]
+            if same_res:
+                direct_pred = max(same_res, key=lambda p: p.data_end)
+                deps.append(f"{direct_pred.wo}-{direct_pred.op}")
+            else:
+                # Fall back to rank-based dependency
+                if my_rank > 1:
+                    for p in wo_ops:
+                        p_cat = operatie_map.get(str(p.op))
+                        if p_cat and p_cat.rank < my_rank:
+                            deps.append(f"{p.wo}-{p.op}")
+        else:
+            if my_rank > 1:
+                for p in wo_ops:
+                    p_cat = operatie_map.get(str(p.op))
+                    if p_cat and p_cat.rank < my_rank:
+                        deps.append(f"{p.wo}-{p.op}")
 
         tasks.append(GanttTask(
             id=f"{r.wo}-{r.op}",
