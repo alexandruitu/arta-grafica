@@ -175,9 +175,40 @@ def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
             PlanificareRezultat.wo == cp,
         ).all():
             planned_map[r.op] = r
+    # Pre-load all results in this session for queue analysis
+    all_results_in_session: list[PlanificareRezultat] = []
+    if sesiune:
+        all_results_in_session = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == sesiune.id,
+            PlanificareRezultat.resursa_id.isnot(None),
+            PlanificareRezultat.data_start.isnot(None),
+            PlanificareRezultat.data_end.isnot(None),
+        ).all()
+
     result = []
     for op in ops:
         r = planned_map.get(op.op)
+
+        # Queue analysis: ops on the same resource scheduled before this one
+        coada = []
+        if r and r.resursa_id and r.data_start:
+            for other in all_results_in_session:
+                if (
+                    other.resursa_id == r.resursa_id
+                    and other.data_end is not None
+                    and other.data_end <= r.data_start
+                    and other.wo != cp  # exclude same WO
+                ):
+                    coada.append({
+                        "wo": other.wo,
+                        "op": other.op,
+                        "start": other.data_start.strftime("%Y-%m-%d %H:%M"),
+                        "end": other.data_end.strftime("%Y-%m-%d %H:%M"),
+                        "durata_ore": round(other.durata_ore, 1),
+                    })
+            # Sort by start time
+            coada.sort(key=lambda x: x["start"])
+
         result.append({
             "id": op.id, "cl": op.cl, "wo": op.wo, "op": op.op,
             "descr_op": op.descr_op, "stock_code": op.stock_code,
@@ -189,6 +220,8 @@ def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
             "data_end_plan": r.data_end.strftime("%Y-%m-%d %H:%M") if r and r.data_end else None,
             "status_plan": r.status if r else None,
             "resursa_plan": r.resursa_nume if r else None,
+            "coada_lungime": len(coada),
+            "coada": coada,
         })
     return result
 

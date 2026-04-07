@@ -10,6 +10,7 @@ export default function ComenziList() {
   const [stadiuFilter, setStadiuFilter] = useState('');
   const [expandedCP, setExpandedCP] = useState<number | null>(null);
   const [operatii, setOperatii] = useState<any[]>([]);
+  const [expandedOpCoada, setExpandedOpCoada] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [planningMap, setPlanningMap] = useState<Record<string, any>>({});
 
@@ -40,8 +41,9 @@ export default function ComenziList() {
   };
 
   const toggleExpand = async (cp: number) => {
-    if (expandedCP === cp) { setExpandedCP(null); return; }
+    if (expandedCP === cp) { setExpandedCP(null); setExpandedOpCoada(null); return; }
     setExpandedCP(cp);
+    setExpandedOpCoada(null);
     try {
       const ops = await api.getComandaOperatii(cp);
       setOperatii(ops);
@@ -77,6 +79,8 @@ export default function ComenziList() {
     return map[status] || 'bg-slate-100 text-slate-600';
   };
 
+  const isNeachitat = (c: any) => c.val_de_platit > 0 && c.val_platita < c.val_de_platit;
+
   const liveStats = useMemo(() => ({
     total:      comenzi.length,
     stadiu06:   comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
@@ -86,16 +90,20 @@ export default function ComenziList() {
       const ps = planningMap[String(c.cp)];
       return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
     }).length,
+    neachitate: comenzi.filter(isNeachitat).length,
   }), [comenzi, planningMap]);
 
   const hasFilter = !!(search || statusFilter || stadiuFilter);
 
   const filteredComenzi = useMemo(() => {
-    if (statusFilter !== '__intarziate__') return comenzi;
-    return comenzi.filter(c => {
-      const ps = planningMap[String(c.cp)];
-      return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
-    });
+    if (statusFilter === '__intarziate__')
+      return comenzi.filter(c => {
+        const ps = planningMap[String(c.cp)];
+        return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
+      });
+    if (statusFilter === '__neachitate__')
+      return comenzi.filter(isNeachitat);
+    return comenzi;
   }, [comenzi, statusFilter, planningMap]);
 
   const overviewCards = [
@@ -134,12 +142,19 @@ export default function ComenziList() {
       active: statusFilter === '__intarziate__',
       onClick: () => { setStatusFilter('__intarziate__'); setStadiuFilter(''); },
     },
+    {
+      label: 'Neachitate',
+      value: liveStats.neachitate,
+      color: 'bg-rose-50 text-rose-700 border-rose-200',
+      active: statusFilter === '__neachitate__',
+      onClick: () => { setStatusFilter('__neachitate__'); setStadiuFilter(''); },
+    },
   ];
 
   // Split cards: status (exclusive: LIBER+STOP=Total) vs subsets (transversal)
   // statusCards: Total, LIBER, STOP  |  subsetCards: 06-În producție, Întârziate
   const statusCards = [overviewCards[0], overviewCards[2], overviewCards[3]]; // Total, LIBER, STOP
-  const subsetCards = [overviewCards[1], overviewCards[4]];                   // 06-În producție, Întârziate
+  const subsetCards = [overviewCards[1], overviewCards[4], overviewCards[5]]; // 06-În producție, Întârziate, Neachitate
 
   return (
     <div className="space-y-4">
@@ -316,6 +331,7 @@ export default function ComenziList() {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="text-slate-500">
+                                  <th className="text-left py-1 w-4"></th>
                                   <th className="text-left py-1">CL</th>
                                   <th className="text-left py-1">OP</th>
                                   <th className="text-left py-1">Descriere</th>
@@ -323,6 +339,7 @@ export default function ComenziList() {
                                   <th className="text-left py-1">Start plan.</th>
                                   <th className="text-left py-1">Stop plan.</th>
                                   <th className="text-left py-1">Status</th>
+                                  <th className="text-left py-1">Coadă</th>
                                   <th className="text-right py-1">P Runtime</th>
                                   <th className="text-right py-1">R Runtime</th>
                                   <th className="text-right py-1">Rest</th>
@@ -332,14 +349,27 @@ export default function ComenziList() {
                                 {operatii.map((op: any, i: number) => {
                                   const statusColors: Record<string, string> = {
                                     planned: 'text-green-600',
+                                    previzionat_bt: 'text-blue-600',
+                                    previzionat_material: 'text-blue-600',
                                     previzionat: 'text-blue-600',
                                     no_material: 'text-red-500',
                                     no_resource: 'text-orange-500',
                                     no_bt: 'text-amber-500',
                                     blocked_by_rank: 'text-slate-500',
                                   };
+                                  const hasCoada = op.coada_lungime > 0;
+                                  const coadaOpen = expandedOpCoada === i;
                                   return (
-                                  <tr key={i} className="border-t border-slate-200">
+                                  <>
+                                  <tr key={i} className="border-t border-slate-200 hover:bg-white">
+                                    <td className="py-1">
+                                      {hasCoada && (
+                                        <button onClick={() => setExpandedOpCoada(coadaOpen ? null : i)}
+                                          className="text-slate-400 hover:text-slate-600">
+                                          {coadaOpen ? '▾' : '▸'}
+                                        </button>
+                                      )}
+                                    </td>
                                     <td className="py-1">{op.cl}</td>
                                     <td className="py-1 font-mono">{op.op}</td>
                                     <td className="py-1">{op.descr_op}</td>
@@ -349,10 +379,45 @@ export default function ComenziList() {
                                     <td className={`py-1 text-xs ${statusColors[op.status_plan] || 'text-slate-400'}`}>
                                       {op.status_plan || '-'}
                                     </td>
+                                    <td className="py-1">
+                                      {hasCoada ? (
+                                        <button onClick={() => setExpandedOpCoada(coadaOpen ? null : i)}
+                                          className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                            op.coada_lungime >= 10 ? 'bg-red-100 text-red-700' :
+                                            op.coada_lungime >= 5  ? 'bg-orange-100 text-orange-700' :
+                                                                     'bg-slate-100 text-slate-600'
+                                          }`}>
+                                          {op.coada_lungime} op.
+                                        </button>
+                                      ) : op.data_start_plan ? (
+                                        <span className="text-green-600 text-xs">Prima liberă</span>
+                                      ) : <span className="text-slate-300">—</span>}
+                                    </td>
                                     <td className="py-1 text-right">{op.p_runtime}</td>
                                     <td className="py-1 text-right">{op.r_runtime}</td>
                                     <td className="py-1 text-right font-medium">{op.q_rest}</td>
                                   </tr>
+                                  {coadaOpen && hasCoada && (
+                                    <tr key={`coada-${i}`} className="bg-amber-50 border-t border-amber-200">
+                                      <td colSpan={12} className="px-4 py-2">
+                                        <p className="text-xs font-semibold text-amber-800 mb-1.5">
+                                          Coadă pe {op.resursa_plan} — {op.coada_lungime} operații înaintea acesteia:
+                                        </p>
+                                        <div className="flex flex-col gap-0.5">
+                                          {op.coada.map((q: any, qi: number) => (
+                                            <div key={qi} className="flex gap-3 text-xs font-mono text-amber-900">
+                                              <span className="text-amber-400 w-4 text-right">{qi + 1}.</span>
+                                              <span className="font-bold w-20">WO {q.wo}</span>
+                                              <span className="text-amber-600">OP {q.op}</span>
+                                              <span>{q.start} → {q.end}</span>
+                                              <span className="text-amber-500">({q.durata_ore}h)</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                  </>
                                   );
                                 })}
                               </tbody>
