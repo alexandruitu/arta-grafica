@@ -119,7 +119,7 @@ export default function ComenziList() {
       value: liveStats.stadiu06,
       color: 'bg-green-50 text-green-700 border-green-200',
       active: stadiuFilter === '06 - In productie',
-      onClick: () => { setStadiuFilter('06 - In productie'); setStatusFilter(''); },
+      onClick: () => { setStadiuFilter(stadiuFilter === '06 - In productie' ? '' : '06 - In productie'); setStatusFilter(''); },
     },
     {
       label: 'LIBER',
@@ -140,14 +140,14 @@ export default function ComenziList() {
       value: liveStats.intarziate,
       color: 'bg-orange-50 text-orange-700 border-orange-200',
       active: statusFilter === '__intarziate__',
-      onClick: () => { setStatusFilter('__intarziate__'); setStadiuFilter(''); },
+      onClick: () => { setStatusFilter(statusFilter === '__intarziate__' ? '' : '__intarziate__'); setStadiuFilter(''); },
     },
     {
       label: 'Neachitate',
       value: liveStats.neachitate,
       color: 'bg-rose-50 text-rose-700 border-rose-200',
       active: statusFilter === '__neachitate__',
-      onClick: () => { setStatusFilter('__neachitate__'); setStadiuFilter(''); },
+      onClick: () => { setStatusFilter(statusFilter === '__neachitate__' ? '' : '__neachitate__'); setStadiuFilter(''); },
     },
   ];
 
