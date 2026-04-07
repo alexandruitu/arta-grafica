@@ -17,7 +17,8 @@ export default function ComenziList() {
     setLoading(true);
     const params: Record<string, string> = { limit: '2000' };
     if (search) params.search = search;
-    if (statusFilter) params.status = statusFilter;
+    // '__intarziate__' is a client-side pseudo-filter — never send to server
+    if (statusFilter && statusFilter !== '__intarziate__') params.status = statusFilter;
     if (stadiuFilter) params.stadiu = stadiuFilter;
     try {
       const data = await api.getComenzi(params);
