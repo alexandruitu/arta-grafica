@@ -21,7 +21,8 @@ from models import (
 )
 from planner import (
     has_valid_bt, get_delivery_date, calc_remaining_time,
-    find_slot, get_stadiu_priority, run_planning, INVALID_BT_DATE,
+    find_slot_precise, get_stadiu_priority, run_planning,
+    INVALID_BT_DATE, SHIFT_START_H, SHIFT_END_H,
 )
 from collections import defaultdict
 
@@ -164,46 +165,97 @@ class TestGetStadiuPriority:
         assert get_stadiu_priority("99 - Unknown") == 0
 
 
-class TestFindSlot:
+class TestFindSlotPrecise:
+    """Tests for find_slot_precise — hour-precise slot finder (shift 06:00-22:00)."""
+
+    def _make_disp(self, resursa_id: int, dates: dict) -> dict:
+        """Build a disponibilitate dict: {resursa_id: {date: ore_disponibile}}."""
+        return {resursa_id: dates}
 
     def test_single_day_enough(self):
-        disp = defaultdict(lambda: defaultdict(float))
-        disp[1][date(2026, 4, 1)] = 8.0
-        start, end, hours = find_slot(1, disp, 5.0, date(2026, 4, 1))
-        assert start == date(2026, 4, 1)
-        assert end == date(2026, 4, 1)
-        assert disp[1][date(2026, 4, 1)] == 3.0  # 8 - 5
+        """Slot fits within one working day."""
+        disp = self._make_disp(1, {date(2026, 4, 1): 8.0})
+        nft: dict = {}
+        earliest = datetime(2026, 4, 1, SHIFT_START_H, 0)
+        start, end = find_slot_precise(1, disp, nft, 5.0, earliest)
+        assert start is not None
+        assert start.date() == date(2026, 4, 1)
+        assert start.hour == SHIFT_START_H
+        assert end is not None
+        assert end.date() == date(2026, 4, 1)
+        # next_free_time should be updated to slot_end
+        assert nft[1] == end
 
     def test_multi_day_slot(self):
-        disp = defaultdict(lambda: defaultdict(float))
-        disp[1][date(2026, 4, 1)] = 4.0
-        disp[1][date(2026, 4, 2)] = 4.0
-        start, end, hours = find_slot(1, disp, 6.0, date(2026, 4, 1))
-        assert start == date(2026, 4, 1)
-        assert end == date(2026, 4, 2)
-        assert disp[1][date(2026, 4, 1)] == 0.0  # fully used
-        assert disp[1][date(2026, 4, 2)] == 2.0   # 4 - 2
+        """Slot spans two days when hours needed exceed one full shift (16h 06:00-22:00)."""
+        # shift = 16h/day; need 20h → must span 2 days
+        disp = self._make_disp(1, {date(2026, 4, 1): 16.0, date(2026, 4, 2): 16.0})
+        nft: dict = {}
+        earliest = datetime(2026, 4, 1, SHIFT_START_H, 0)
+        start, end = find_slot_precise(1, disp, nft, 20.0, earliest)
+        assert start is not None and start.date() == date(2026, 4, 1)
+        assert end is not None and end.date() == date(2026, 4, 2)
 
-    def test_no_availability(self):
-        disp = defaultdict(lambda: defaultdict(float))
-        start, end, hours = find_slot(1, disp, 5.0, date(2026, 4, 1))
+    def test_no_availability_returns_none(self):
+        """No working days → returns (None, None)."""
+        disp = self._make_disp(1, {})
+        nft: dict = {}
+        earliest = datetime(2026, 4, 1, SHIFT_START_H, 0)
+        start, end = find_slot_precise(1, disp, nft, 5.0, earliest)
         assert start is None
         assert end is None
 
-    def test_skip_zero_days(self):
-        disp = defaultdict(lambda: defaultdict(float))
-        disp[1][date(2026, 4, 1)] = 0.0
-        disp[1][date(2026, 4, 2)] = 0.0
-        disp[1][date(2026, 4, 3)] = 8.0
-        start, end, _ = find_slot(1, disp, 3.0, date(2026, 4, 1))
-        assert start == date(2026, 4, 3)
+    def test_skip_zero_hour_days(self):
+        """Days with 0 ore_disponibile are skipped."""
+        disp = self._make_disp(1, {
+            date(2026, 4, 1): 0.0,
+            date(2026, 4, 2): 0.0,
+            date(2026, 4, 3): 8.0,
+        })
+        nft: dict = {}
+        earliest = datetime(2026, 4, 1, SHIFT_START_H, 0)
+        start, end = find_slot_precise(1, disp, nft, 2.0, earliest)
+        assert start is not None and start.date() == date(2026, 4, 3)
 
     def test_earliest_start_respected(self):
-        disp = defaultdict(lambda: defaultdict(float))
-        disp[1][date(2026, 4, 1)] = 8.0
-        disp[1][date(2026, 4, 5)] = 8.0
-        start, end, _ = find_slot(1, disp, 3.0, date(2026, 4, 3))
-        assert start == date(2026, 4, 5)  # skips April 1 (before earliest)
+        """earliest_start in the future skips past working days."""
+        disp = self._make_disp(1, {
+            date(2026, 4, 1): 8.0,
+            date(2026, 4, 5): 8.0,
+        })
+        nft: dict = {}
+        # earliest = April 3, so April 1 is skipped
+        earliest = datetime(2026, 4, 3, SHIFT_START_H, 0)
+        start, end = find_slot_precise(1, disp, nft, 2.0, earliest)
+        assert start is not None and start.date() == date(2026, 4, 5)
+
+    def test_next_free_time_chains_slots(self):
+        """Second call respects next_free_time left by first call."""
+        disp = self._make_disp(1, {date(2026, 4, 1): 16.0})  # 16h = full shift 6-22
+        nft: dict = {}
+        earliest = datetime(2026, 4, 1, SHIFT_START_H, 0)
+
+        s1, e1 = find_slot_precise(1, disp, nft, 8.0, earliest)
+        s2, e2 = find_slot_precise(1, disp, nft, 8.0, earliest)
+
+        assert s1 is not None and s2 is not None
+        # Second slot must start where first ended
+        assert s2 >= e1
+
+    def test_slot_respects_shift_end(self):
+        """A slot must not exceed SHIFT_END_H (22:00)."""
+        disp = self._make_disp(1, {date(2026, 4, 1): 8.0, date(2026, 4, 2): 8.0})
+        nft: dict = {}
+        # Start at 20:00 → only 2h left in shift → must overflow to next day
+        earliest = datetime(2026, 4, 1, 20, 0)
+        start, end = find_slot_precise(1, disp, nft, 5.0, earliest)
+        assert start is not None
+        # End must not exceed 22:00 on any single day
+        assert end is not None
+        # With 5h needed and only 2h on day1, end must be on day2
+        assert end.date() >= date(2026, 4, 1)
+        if end.date() == date(2026, 4, 1):
+            assert end.hour <= SHIFT_END_H
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -436,9 +488,15 @@ class TestMaterialShortageDetection:
 
 
 class TestBTValidation:
-    """Test that operations are blocked when BT is missing."""
+    """Test BT (Bun de Tipar) validation in the planner.
 
-    def test_no_bt_blocks_planning(self, db):
+    Algorithm behavior (post sub-classification update):
+    - No BT + resource available  → previzionat_bt  (scheduled optimistically)
+    - No BT + NO resource at all  → no_bt           (fully blocked)
+    """
+
+    def test_no_bt_with_resource_gives_previzionat_bt(self, db):
+        """No BT but resource exists → previzionat_bt (scheduled without confirmed BT)."""
         c = make_comanda(4001, bt1=None, bt2=None, bt3=None, bt4=None)
         db.add(c)
         db.flush()
@@ -462,9 +520,16 @@ class TestBTValidation:
             PlanificareRezultat.wo == 4001
         ).first()
 
-        assert result.status == "no_bt"
+        assert result is not None
+        assert result.status == "previzionat_bt", (
+            f"Expected previzionat_bt (resource exists but no BT), got '{result.status}'"
+        )
+        # Must still have a scheduled time slot
+        assert result.data_start is not None
+        assert result.data_end is not None
 
-    def test_invalid_bt_date_blocks(self, db):
+    def test_invalid_bt_date_with_resource_gives_previzionat_bt(self, db):
+        """BT=1911-11-11 (invalid sentinel) + resource → previzionat_bt."""
         c = make_comanda(4002, bt1=INVALID_BT_DATE)
         db.add(c)
         db.flush()
@@ -488,7 +553,37 @@ class TestBTValidation:
             PlanificareRezultat.wo == 4002
         ).first()
 
-        assert result.status == "no_bt"
+        assert result is not None
+        assert result.status == "previzionat_bt"
+
+    def test_no_bt_and_no_resource_gives_no_resource(self, db):
+        """No BT + no matching resource → no_resource.
+
+        Resource check fires before BT check in status assignment:
+        - no BT + resource exists   → previzionat_bt
+        - no BT + no resource       → no_resource  (resource has priority)
+        """
+        c = make_comanda(4003, bt1=None, bt2=None, bt3=None, bt4=None)
+        db.add(c)
+        db.flush()
+
+        d = make_dispatch(4003, 10, "CL_NONEXISTENT")
+        db.add(d)
+
+        op = make_operatie(10, rank=1)
+        db.add(op)
+        # No Resursa added for CL_NONEXISTENT
+        db.commit()
+
+        run_planning(db)
+        result = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.wo == 4003
+        ).first()
+
+        assert result is not None
+        assert result.status == "no_resource", (
+            f"Expected no_resource (resource check takes priority over BT), got '{result.status}'"
+        )
 
 
 class TestRankBlocking:
@@ -603,10 +698,10 @@ class TestRankBlocking:
         assert results[0].status == "planned"
         assert results[1].status == "planned"
 
-        # Rank 2 should start AFTER rank 1 ends
-        assert results[1].data_start.date() > results[0].data_start.date(), (
-            f"Rank 2 start ({results[1].data_start.date()}) should be after "
-            f"rank 1 start ({results[0].data_start.date()})"
+        # Rank 2 must start at or after rank 1 ends (hour-precise)
+        assert results[1].data_start >= results[0].data_end, (
+            f"Rank 2 start ({results[1].data_start}) must be >= "
+            f"rank 1 end ({results[0].data_end})"
         )
 
 
@@ -739,7 +834,8 @@ class TestFullIntegration:
         r3 = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 7003).first()
 
         assert r1 is not None and r1.status == "planned", f"WO 7001: {r1.status if r1 else 'missing'}"
-        assert r2 is not None and r2.status == "no_bt", f"WO 7002: {r2.status if r2 else 'missing'}"
+        # No BT + resource exists → previzionat_bt (scheduled optimistically)
+        assert r2 is not None and r2.status == "previzionat_bt", f"WO 7002: {r2.status if r2 else 'missing'}"
         assert r3 is not None and r3.status == "no_material", (
             f"WO 7003: expected no_material, got '{r3.status if r3 else 'missing'}'. "
             f"Material check may be broken!"
