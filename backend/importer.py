@@ -74,8 +74,8 @@ def import_comenzi(db: Session, filepath: str):
         comanda = Comanda(
             id=safe_int(row.get("id")),
             cp=safe_int(row.get("CP")),
-            cv=safe_int(row.get("CV")),
-            client=safe_str(row.get("Client")),
+            cv=safe_int(row.get("CV") or row.get("Comanda")),  # Excel: "Comanda" = CV
+            client=safe_str(row.get("Dealer")),        # Excel: "Dealer" = clientul tipografiei
             client_final=safe_str(row.get("ClientFinal")),
             tip_produs=safe_str(row.get("TipProdus")),
             articol=safe_str(row.get("Articol")),
