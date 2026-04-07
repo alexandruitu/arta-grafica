@@ -324,7 +324,7 @@ export default function ComenziList() {
                         <td colSpan={15} className="px-6 py-3 bg-slate-50">
                           <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
                           {operatii.length === 0 ? (
-                            <p className="text-xs text-slate-400">Nicio operatie gasita</p>
+                            <p className="text-xs text-slate-400">Nicio operație în Dispatch — comanda nu are operații planificate în ERP (nu apare în Dispatch List_AS.xlsx)</p>
                           ) : (
                             <table className="w-full text-xs">
                               <thead>
