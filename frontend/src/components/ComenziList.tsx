@@ -236,7 +236,6 @@ export default function ComenziList() {
               <tr>
                 <th className="px-3 py-2 text-left w-8"></th>
                 <th className="px-3 py-2 text-left">CP</th>
-                <th className="px-3 py-2 text-left">CV</th>
                 <th className="px-3 py-2 text-left">Client</th>
                 <th className="px-3 py-2 text-left">Articol</th>
                 <th className="px-3 py-2 text-left">Tip</th>
@@ -266,7 +265,6 @@ export default function ComenziList() {
                         {expandedCP === c.cp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
                       <td className="px-3 py-2 font-mono font-medium">{c.cp || '-'}</td>
-                      <td className="px-3 py-2 font-mono">{c.cv || '-'}</td>
                       <td className="px-3 py-2">{c.client}</td>
                       <td className="px-3 py-2 max-w-[200px] truncate" title={c.articol}>{c.articol}</td>
                       <td className="px-3 py-2">
@@ -323,7 +321,7 @@ export default function ComenziList() {
                     </tr>
                     {expandedCP === c.cp && (
                       <tr key={`ops-${c.cp}`}>
-                        <td colSpan={16} className="px-6 py-3 bg-slate-50">
+                        <td colSpan={15} className="px-6 py-3 bg-slate-50">
                           <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
                           {operatii.length === 0 ? (
                             <p className="text-xs text-slate-400">Nicio operatie gasita</p>
