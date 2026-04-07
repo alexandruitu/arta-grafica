@@ -38,6 +38,11 @@ _VALID_TOKEN: str = _hashlib.sha256(
 
 _PLAN_LOCK = _threading.Lock()
 
+# Status constants — must match planner.py output
+PREVIZIONAT_STATUSES = {"previzionat", "previzionat_bt", "previzionat_material"}
+PLACED_STATUSES      = {"planned"} | PREVIZIONAT_STATUSES   # ops that got a time slot
+BLOCKED_STATUSES     = {"no_bt", "no_material", "no_resource", "blocked_by_rank"}
+
 app = FastAPI(title="Arta Grafica - Production Planning", version="1.0.0")
 
 app.add_middleware(
@@ -334,7 +339,7 @@ def get_gantt_data(
 
         if r.frozen:
             custom_class = "bar-frozen-late" if is_late else "bar-frozen-ok"
-        elif r.status == "previzionat":
+        elif r.status in ("previzionat", "previzionat_bt", "previzionat_material"):
             custom_class = "bar-late" if is_late else "bar-previzionat"
         else:
             custom_class = "bar-late" if is_late else "bar-planned"
@@ -443,22 +448,26 @@ def get_board_data(db: Session = Depends(get_db)):
             "isParent": False,
         })
 
-    # 5-color logic (same semantics as Gantt)
+    # 5-color logic — status values match planner.py output exactly
     def item_color(op: PlanificareRezultat, is_late: bool) -> str:
         if op.frozen:
             # portocaliu = frozen dar imposibil (fara material sau blocat de rank)
-            return "#ea580c" if op.status in ("Fara Material", "Blocat Rank") else "#7c3aed"
-        if op.status == "Fara BT":
-            return "#2563eb"   # albastru — previzionat
+            return "#ea580c" if op.status in ("no_material", "blocked_by_rank") else "#7c3aed"
+        if op.status in ("previzionat", "previzionat_bt", "previzionat_material"):
+            return "#2563eb"   # albastru — previzionat (fara BT sau fara material curent)
         if is_late:
             return "#dc2626"   # rosu — intarziat
         return "#16a34a"       # verde — planificat, neintarziat
 
     status_label_map = {
-        "planned":       "Planificat",
-        "Fara BT":       "Previzionat",
-        "Fara Material": "Fără Material",
-        "Blocat Rank":   "Blocat Rank",
+        "planned":              "Planificat",
+        "previzionat":          "Previzionat",
+        "previzionat_bt":       "Previzionat (fără BT)",
+        "previzionat_material": "Previzionat (fără material)",
+        "no_bt":                "Blocat – fără BT",
+        "no_material":          "Blocat – fără material",
+        "no_resource":          "Blocat – fără resursă",
+        "blocked_by_rank":      "Blocat – rank",
     }
 
     items: list = []
@@ -552,10 +561,12 @@ def get_planning_stats(db: Session = Depends(get_db)):
     )
     counts = {status: cnt for status, cnt in rows}
     total = sum(counts.values())
+    # Sum all previzionat sub-types together
+    previzionat_total = sum(counts.get(s, 0) for s in PREVIZIONAT_STATUSES)
     return {
         "total": total,
         "planned": counts.get("planned", 0),
-        "previzionat": counts.get("previzionat", 0),
+        "previzionat": previzionat_total,
         "no_material": counts.get("no_material", 0),
         "no_bt": counts.get("no_bt", 0),
         "blocked_by_rank": counts.get("blocked_by_rank", 0),
@@ -614,7 +625,7 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
     for wo, ops in by_wo.items():
         planned_ends = [
             r.data_end for r in ops
-            if r.status in ("planned", "previzionat") and r.data_end
+            if r.status in PLACED_STATUSES and r.data_end
         ]
         data_planificare = max(planned_ends).date() if planned_ends else None
 
@@ -625,13 +636,15 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
             intarziere_zile = (data_planificare - data_livrare).days
 
         statuses = {r.status for r in ops}
+        has_previzionat = bool(statuses & PREVIZIONAT_STATUSES)
+        has_placed      = bool(statuses & PLACED_STATUSES)
         if statuses <= {"planned"}:
             status_planificare = "Planificat"
-        elif "previzionat" in statuses and statuses <= {"planned", "previzionat"}:
+        elif has_previzionat and statuses <= PLACED_STATUSES:
             status_planificare = "Previzionat"
-        elif statuses <= {"no_bt", "no_material", "no_resource", "blocked_by_rank"}:
+        elif statuses <= BLOCKED_STATUSES:
             status_planificare = "Blocat"
-        elif "planned" in statuses or "previzionat" in statuses:
+        elif has_placed:
             status_planificare = "Partial"
         else:
             status_planificare = "Blocat"
@@ -667,7 +680,7 @@ def set_start(result_id: int, body: dict, db: Session = Depends(get_db)):
     r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
-    if r.status not in ("planned", "previzionat"):
+    if r.status not in PLACED_STATUSES:
         raise HTTPException(status_code=400, detail=f"Doar operatiile planificate pot fi modificate (status: {r.status})")
     data_start_str = body.get("data_start", "")
     try:
@@ -721,7 +734,7 @@ def set_frozen(result_id: int, body: FrozenBody, db: Session = Depends(get_db)):
     r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
-    if r.status not in ("planned", "previzionat"):
+    if r.status not in PLACED_STATUSES:
         raise HTTPException(
             status_code=400,
             detail=f"Doar operatiile planificate pot fi frozen (status curent: {r.status})",
@@ -805,7 +818,7 @@ def get_stats(db: Session = Depends(get_db)):
         for wo, ops in by_wo.items():
             if any(r.status in BLOCKED_STATUSES for r in ops):
                 comenzi_blocate += 1
-            planned_ends = [r.data_end for r in ops if r.status in ("planned", "previzionat") and r.data_end]
+            planned_ends = [r.data_end for r in ops if r.status in PLACED_STATUSES and r.data_end]
             if planned_ends:
                 max_end = max(planned_ends).date()
                 delivery = wo_delivery.get(wo)

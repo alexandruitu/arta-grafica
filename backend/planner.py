@@ -175,7 +175,7 @@ def run_planning(db: Session) -> dict:
         ).all():
             frozen_ops[(fr.wo, fr.op)] = fr
 
-    # ── Step 1: Load and sort orders ──────────────────────────────────────────
+    # ── Step 1: Load orders ───────────────────────────────────────────────────
     comenzi = (
         db.query(Comanda)
         .filter(Comanda.status_cda != "STOP")
@@ -183,9 +183,31 @@ def run_planning(db: Session) -> dict:
         .all()
     )
 
+    # ── Step 1b: Pre-scan material availability per WO for sort priority ──────
+    # Quick stock snapshot (sold_actual) without modifying stoc_tracker yet.
+    # wo_has_material[cp] = True if SOLD - REZ > 0 for all needed articles.
+    _stoc_snap: dict[str, float] = {}
+    _wo_mat_snap: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for d in db.query(Deficit).all():
+        art = d.articol
+        if art and art not in _stoc_snap:
+            _stoc_snap[art] = d.sold_actual if d.sold_actual else 0.0
+        if d.tip_rezervare == "B" and d.pe_comanda and d.articol:
+            cantitate = abs(d.cantitate) if d.cantitate else 0.0
+            _wo_mat_snap[str(d.pe_comanda)].append((d.articol, cantitate))
+
+    def wo_has_material(cp: int) -> bool:
+        """True if current stock covers ALL reservations for this WO."""
+        for art, needed in _wo_mat_snap.get(str(cp), []):
+            if _stoc_snap.get(art, 0.0) < needed:
+                return False
+        return True
+
+    # Sort: higher stadiu → earlier delivery → WITH material first (Planificată > Previzionată)
     comenzi.sort(key=lambda c: (
         -get_stadiu_priority(c.stadiu_prepress),  # Higher priority first
         get_delivery_date(c),                      # Earlier delivery first
+        0 if wo_has_material(c.cp) else 1,         # With material before without
     ))
 
     # ── Step 2: Load operations catalog (for rank lookup) ────────────────────
@@ -254,7 +276,8 @@ def run_planning(db: Session) -> dict:
     # ── Step 6: Plan operations ───────────────────────────────────────────────
     stats = {
         "planned": 0,
-        "previzionat": 0,
+        "previzionat_bt": 0,       # previzionat: fara BT dar cu data_limita_bt
+        "previzionat_material": 0, # previzionat: fara material dar cu aprovizionare
         "no_material": 0,
         "no_resource": 0,
         "blocked_by_rank": 0,
@@ -294,10 +317,13 @@ def run_planning(db: Session) -> dict:
         # ── Determine WO-level planning mode ─────────────────────────────────
         wo_block: tuple[str, str] | None = None
         wo_previzionat_start: date | None = None
+        # Tracks WHY this WO is previzionat — used for status sub-type
+        wo_previzionat_reason: str = ""   # "bt" | "material" | "bt+material"
 
         if not has_valid_bt(comanda):
             if comanda.data_limita_bt:
                 wo_previzionat_start = comanda.data_limita_bt
+                wo_previzionat_reason = "bt"
             else:
                 wo_block = ("no_bt", "Comanda nu are Bun de Tipar valid si nu are data limita BT")
 
@@ -319,6 +345,10 @@ def run_planning(db: Session) -> dict:
             else:
                 new_start = mat_date
                 wo_previzionat_start = max(wo_previzionat_start, new_start) if wo_previzionat_start else new_start
+                # Mark material as previzionat reason (may combine with BT reason)
+                wo_previzionat_reason = (
+                    "bt+material" if wo_previzionat_reason == "bt" else "material"
+                )
 
         # Reserve materials only if WO is not hard-blocked.
         # Previzionat WOs are considered committed (material will arrive), so
@@ -339,8 +369,12 @@ def run_planning(db: Session) -> dict:
         rank_status: dict[int, str] = {}
         rank_end_date: dict[int, datetime] = {}
 
-        # Priority: open=2, planned/previzionat=1, completed=0  (higher = more restrictive)
-        _STATUS_PRIO = {"completed": 0, "planned": 1, "previzionat": 1, "open": 2}
+        # Priority: open=2, placed(planned/previzionat*)=1, completed=0  (higher = more restrictive)
+        _STATUS_PRIO = {
+            "completed": 0,
+            "planned": 1, "previzionat_bt": 1, "previzionat_material": 1,
+            "open": 2,
+        }
 
         def update_rank(rank: int, new_status: str, end_dt: datetime | None = None):
             """Update rank tracking, keeping the most restrictive status."""
@@ -367,9 +401,13 @@ def run_planning(db: Session) -> dict:
                     durata_ore=fr.durata_ore,
                     frozen=True, status=fr.status, motiv=None,
                 ))
-                stats[fr.status] += 1
+                # Migrate legacy "previzionat" status from older sessions
+                frozen_status = fr.status
+                if frozen_status == "previzionat":
+                    frozen_status = "previzionat_bt"
+                stats[frozen_status] = stats.get(frozen_status, 0) + 1
                 frozen_rank = get_rank(disp)
-                update_rank(frozen_rank, fr.status, fr.data_end if fr.data_end else None)
+                update_rank(frozen_rank, frozen_status, fr.data_end if fr.data_end else None)
                 continue
 
             remaining = calc_remaining_time(disp)
@@ -414,7 +452,7 @@ def run_planning(db: Session) -> dict:
                 if prev_status == "open":
                     blocked = True
                     break
-                if prev_status in ("planned", "previzionat") and prev_rank in rank_end_date:
+                if prev_status in ("planned", "previzionat_bt", "previzionat_material") and prev_rank in rank_end_date:
                     # Must start after predecessor finishes (hour precision)
                     earliest_start = max(
                         earliest_start,
@@ -454,7 +492,15 @@ def run_planning(db: Session) -> dict:
                 if slot_start is None:
                     continue  # no room on this resource, try next
 
-                final_status = "previzionat" if wo_previzionat_start is not None else "planned"
+                if wo_previzionat_start is None:
+                    final_status = "planned"
+                elif wo_previzionat_reason == "bt":
+                    final_status = "previzionat_bt"
+                elif wo_previzionat_reason == "material":
+                    final_status = "previzionat_material"
+                else:
+                    final_status = "previzionat_bt"   # bt+material — BT is the primary constraint
+
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id, dispatch_id=disp.id,
                     wo=disp.wo, op=disp.op, cl=disp.cl,
@@ -484,8 +530,9 @@ def run_planning(db: Session) -> dict:
     total = sum(v for k, v in stats.items() if k != "completed")
     sesiune.status = "completed"
     sesiune.total_operatii = total + stats["completed"]
-    sesiune.operatii_planificate = stats["planned"] + stats["previzionat"]
-    sesiune.operatii_neplanificate = total - stats["planned"] - stats["previzionat"]
+    previzionat_total = stats["previzionat_bt"] + stats["previzionat_material"]
+    sesiune.operatii_planificate = stats["planned"] + previzionat_total
+    sesiune.operatii_neplanificate = total - stats["planned"] - previzionat_total
     db.commit()
 
     return {
