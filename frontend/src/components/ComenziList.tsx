@@ -77,13 +77,25 @@ export default function ComenziList() {
   };
 
   const liveStats = useMemo(() => ({
-    total:    comenzi.length,
-    stadiu06: comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
-    liber:    comenzi.filter(c => c.status_cda === 'LIBER').length,
-    stop:     comenzi.filter(c => c.status_cda === 'STOP').length,
-  }), [comenzi]);
+    total:      comenzi.length,
+    stadiu06:   comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
+    liber:      comenzi.filter(c => c.status_cda === 'LIBER').length,
+    stop:       comenzi.filter(c => c.status_cda === 'STOP').length,
+    intarziate: comenzi.filter(c => {
+      const ps = planningMap[String(c.cp)];
+      return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
+    }).length,
+  }), [comenzi, planningMap]);
 
   const hasFilter = !!(search || statusFilter || stadiuFilter);
+
+  const filteredComenzi = useMemo(() => {
+    if (statusFilter !== '__intarziate__') return comenzi;
+    return comenzi.filter(c => {
+      const ps = planningMap[String(c.cp)];
+      return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
+    });
+  }, [comenzi, statusFilter, planningMap]);
 
   const overviewCards = [
     {
@@ -113,6 +125,13 @@ export default function ComenziList() {
       color: 'bg-red-50 text-red-700 border-red-200',
       active: statusFilter === 'STOP',
       onClick: () => { setStatusFilter('STOP'); setStadiuFilter(''); },
+    },
+    {
+      label: 'Întârziate',
+      value: liveStats.intarziate,
+      color: 'bg-orange-50 text-orange-700 border-orange-200',
+      active: statusFilter === '__intarziate__',
+      onClick: () => { setStatusFilter('__intarziate__'); setStadiuFilter(''); },
     },
   ];
 
@@ -184,6 +203,7 @@ export default function ComenziList() {
                 <th className="px-3 py-2 text-left">Stadiu Prepress</th>
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Cant.</th>
+                <th className="px-3 py-2 text-left">Data Estimată</th>
                 <th className="px-3 py-2 text-left">Data Livrare</th>
                 <th className="px-3 py-2 text-left">Data Plan.</th>
                 <th className="px-3 py-2 text-left">Intarziere</th>
@@ -193,7 +213,7 @@ export default function ComenziList() {
               </tr>
             </thead>
             <tbody>
-              {comenzi.map(c => {
+              {filteredComenzi.map(c => {
                 const ps = planningMap[String(c.cp)];
                 return (
                   <>
@@ -225,6 +245,7 @@ export default function ComenziList() {
                         </span>
                       </td>
                       <td className="px-3 py-2">{c.cant_vnz}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">{c.data_estimata_livrare || '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{c.data_actualizata_livrare || c.dt_livr_prod || '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs">
                         {ps?.data_planificare || <span className="text-slate-400">-</span>}
@@ -262,7 +283,7 @@ export default function ComenziList() {
                     </tr>
                     {expandedCP === c.cp && (
                       <tr key={`ops-${c.cp}`}>
-                        <td colSpan={15} className="px-6 py-3 bg-slate-50">
+                        <td colSpan={16} className="px-6 py-3 bg-slate-50">
                           <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
                           {operatii.length === 0 ? (
                             <p className="text-xs text-slate-400">Nicio operatie gasita</p>
@@ -273,28 +294,42 @@ export default function ComenziList() {
                                   <th className="text-left py-1">CL</th>
                                   <th className="text-left py-1">OP</th>
                                   <th className="text-left py-1">Descriere</th>
-                                  <th className="text-right py-1">Comandat</th>
-                                  <th className="text-right py-1">Q Plan</th>
-                                  <th className="text-right py-1">P Setup</th>
+                                  <th className="text-left py-1">Resursă</th>
+                                  <th className="text-left py-1">Start plan.</th>
+                                  <th className="text-left py-1">Stop plan.</th>
+                                  <th className="text-left py-1">Status</th>
                                   <th className="text-right py-1">P Runtime</th>
                                   <th className="text-right py-1">R Runtime</th>
                                   <th className="text-right py-1">Rest</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {operatii.map((op: any, i: number) => (
+                                {operatii.map((op: any, i: number) => {
+                                  const statusColors: Record<string, string> = {
+                                    planned: 'text-green-600',
+                                    previzionat: 'text-blue-600',
+                                    no_material: 'text-red-500',
+                                    no_resource: 'text-orange-500',
+                                    no_bt: 'text-amber-500',
+                                    blocked_by_rank: 'text-slate-500',
+                                  };
+                                  return (
                                   <tr key={i} className="border-t border-slate-200">
                                     <td className="py-1">{op.cl}</td>
                                     <td className="py-1 font-mono">{op.op}</td>
                                     <td className="py-1">{op.descr_op}</td>
-                                    <td className="py-1 text-right">{op.comandat}</td>
-                                    <td className="py-1 text-right">{op.q_plan}</td>
-                                    <td className="py-1 text-right">{op.p_setup}</td>
+                                    <td className="py-1 text-slate-600">{op.resursa_plan || '-'}</td>
+                                    <td className="py-1 font-mono">{op.data_start_plan || '-'}</td>
+                                    <td className="py-1 font-mono">{op.data_end_plan || '-'}</td>
+                                    <td className={`py-1 text-xs ${statusColors[op.status_plan] || 'text-slate-400'}`}>
+                                      {op.status_plan || '-'}
+                                    </td>
                                     <td className="py-1 text-right">{op.p_runtime}</td>
                                     <td className="py-1 text-right">{op.r_runtime}</td>
                                     <td className="py-1 text-right font-medium">{op.q_rest}</td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                           )}

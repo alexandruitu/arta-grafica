@@ -17,6 +17,7 @@ class ComandaOut(BaseModel):
     stadiu_prepress: Optional[str] = None
     stadiu_sf: Optional[str] = None
     status_cda: Optional[str] = None
+    data_estimata_livrare: Optional[date] = None
     data_actualizata_livrare: Optional[date] = None
     dt_livr_prod: Optional[date] = None
     val_platita: float

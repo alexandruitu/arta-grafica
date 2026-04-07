@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
-import { Factory, Package, AlertTriangle, CheckCircle, Clock, Upload, X, FileSpreadsheet } from 'lucide-react';
+import { Factory, Package, AlertTriangle, CheckCircle, Clock, Upload, X, FileSpreadsheet, TrendingDown, Ban } from 'lucide-react';
 import AIAssistant from './AIAssistant';
 
 interface Stats {
   total_comenzi: number;
   comenzi_active: number;
   comenzi_stop: number;
+  comenzi_intarziate: number;
+  comenzi_blocate: number;
   total_dispatch: number;
   total_resurse: number;
   stadiu_prepress: Record<string, number>;
@@ -206,11 +208,13 @@ export default function Dashboard() {
       {stats && (
         <>
           {/* Stats cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
             <StatCard icon={Package} label="Total Comenzi" value={stats.total_comenzi} color="bg-blue-500" />
             <StatCard icon={CheckCircle} label="Comenzi Active" value={stats.comenzi_active} color="bg-green-500" />
             <StatCard icon={AlertTriangle} label="Comenzi STOP" value={stats.comenzi_stop} color="bg-red-500" />
-            <StatCard icon={Clock} label="Operatii Dispatch" value={stats.total_dispatch} color="bg-amber-500" />
+            <StatCard icon={TrendingDown} label="Întârziate" value={stats.comenzi_intarziate ?? '-'} color="bg-orange-500" />
+            <StatCard icon={Ban} label="Blocate" value={stats.comenzi_blocate ?? '-'} color="bg-rose-700" />
+            <StatCard icon={Clock} label="Op. Dispatch" value={stats.total_dispatch} color="bg-amber-500" />
             <StatCard icon={Factory} label="Resurse" value={stats.total_resurse} color="bg-purple-500" />
           </div>
 

@@ -132,11 +132,17 @@ def list_comenzi(
         q = q.filter(Comanda.stadiu_prepress == stadiu)
     if search:
         search_term = f"%{search}%"
-        q = q.filter(
+        text_filter = (
             (Comanda.client.ilike(search_term)) |
             (Comanda.articol.ilike(search_term)) |
             (Comanda.ref_client.ilike(search_term))
         )
+        try:
+            cp_int = int(search)
+            text_filter = text_filter | (Comanda.cp == cp_int) | (Comanda.cv == cp_int)
+        except ValueError:
+            pass
+        q = q.filter(text_filter)
     return q.order_by(Comanda.data_actualizata_livrare).offset(offset).limit(limit).all()
 
 
@@ -148,9 +154,38 @@ def get_comanda(cp: int, db: Session = Depends(get_db)):
     return c
 
 
-@app.get("/api/comenzi/{cp}/operatii", response_model=List[DispatchOut])
+@app.get("/api/comenzi/{cp}/operatii")
 def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
-    return db.query(DispatchItem).filter(DispatchItem.wo == cp).all()
+    ops = db.query(DispatchItem).filter(DispatchItem.wo == cp).all()
+    sesiune = (
+        db.query(PlanificareSesiune)
+        .filter(PlanificareSesiune.status == "completed")
+        .order_by(PlanificareSesiune.id.desc())
+        .first()
+    )
+    planned_map: dict = {}
+    if sesiune:
+        for r in db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == sesiune.id,
+            PlanificareRezultat.wo == cp,
+        ).all():
+            planned_map[r.op] = r
+    result = []
+    for op in ops:
+        r = planned_map.get(op.op)
+        result.append({
+            "id": op.id, "cl": op.cl, "wo": op.wo, "op": op.op,
+            "descr_op": op.descr_op, "stock_code": op.stock_code,
+            "comandat": op.comandat, "q_plan": op.q_plan,
+            "p_setup": op.p_setup, "p_runtime": op.p_runtime,
+            "r_setup": op.r_setup, "r_runtime": op.r_runtime,
+            "q_raportat": op.q_raportat, "q_rest": op.q_rest,
+            "data_start_plan": r.data_start.strftime("%Y-%m-%d %H:%M") if r and r.data_start else None,
+            "data_end_plan": r.data_end.strftime("%Y-%m-%d %H:%M") if r and r.data_end else None,
+            "status_plan": r.status if r else None,
+            "resursa_plan": r.resursa_nume if r else None,
+        })
+    return result
 
 
 # --- Dispatch ---
@@ -563,14 +598,18 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
             status_planificare = "Blocat"
 
         articles_needed = wo_articles.get(str(wo), set())
-        status_material = "Disponibil"
-        for art in articles_needed:
-            s = global_stoc.get(art, {"disponibil": 0.0, "disponibil_final": 0.0})
-            if s["disponibil_final"] < 0:
-                status_material = "Lipsa"
-                break
-            elif s["disponibil"] < 0 and status_material == "Disponibil":
-                status_material = "In aprovizionare"
+        # Prioritate: daca planificatorul a blocat WO-ul din lipsa de material → Lipsa
+        if any(r.status == "no_material" for r in ops):
+            status_material = "Lipsa"
+        else:
+            status_material = "Disponibil"
+            for art in articles_needed:
+                s = global_stoc.get(art, {"disponibil": 0.0, "disponibil_final": 0.0})
+                if s["disponibil_final"] < 0:
+                    status_material = "Lipsa"
+                    break
+                elif s["disponibil"] < 0 and status_material == "Disponibil":
+                    status_material = "In aprovizionare"
 
         summaries[str(wo)] = {
             "data_planificare": data_planificare.isoformat() if data_planificare else None,
@@ -649,10 +688,42 @@ def get_stats(db: Session = Depends(get_db)):
         .all()
     )
 
+    # Planning-based counts from latest completed session
+    comenzi_intarziate = 0
+    comenzi_blocate = 0
+    sesiune = (
+        db.query(PlanificareSesiune)
+        .filter(PlanificareSesiune.status == "completed")
+        .order_by(PlanificareSesiune.id.desc())
+        .first()
+    )
+    if sesiune:
+        wo_delivery = {
+            c.cp: (c.data_actualizata_livrare or c.dt_livr_prod)
+            for c in db.query(Comanda).all()
+        }
+        BLOCKED_STATUSES = {"no_material", "no_resource", "no_bt", "blocked_by_rank"}
+        by_wo: dict = {}
+        for r in db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.sesiune_id == sesiune.id
+        ).all():
+            by_wo.setdefault(r.wo, []).append(r)
+        for wo, ops in by_wo.items():
+            if any(r.status in BLOCKED_STATUSES for r in ops):
+                comenzi_blocate += 1
+            planned_ends = [r.data_end for r in ops if r.status in ("planned", "previzionat") and r.data_end]
+            if planned_ends:
+                max_end = max(planned_ends).date()
+                delivery = wo_delivery.get(wo)
+                if delivery and max_end > delivery:
+                    comenzi_intarziate += 1
+
     return {
         "total_comenzi": total_comenzi,
         "comenzi_active": comenzi_active,
         "comenzi_stop": comenzi_stop,
+        "comenzi_intarziate": comenzi_intarziate,
+        "comenzi_blocate": comenzi_blocate,
         "total_dispatch": total_dispatch,
         "total_resurse": total_resurse,
         "stadiu_prepress": {s[0]: s[1] for s in stadiu_counts},
