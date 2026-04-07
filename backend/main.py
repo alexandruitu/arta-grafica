@@ -395,23 +395,20 @@ def get_gantt_data(
 
 @app.get("/api/planificare/board")
 def get_board_data(db: Session = Depends(get_db)):
-    """Resource-centric board view (rows=machines, columns=hours).
-    Returns vis-timeline compatible groups + items with hour-level precision."""
+    """Resource-centric board view with nested CL groups and 5-color status coding.
+    Shows all ops that have a scheduled slot (planned, previzionat/Fara BT, frozen)."""
     sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
     if not sesiune:
         return {"groups": [], "items": []}
 
+    # Include all ops with a scheduled slot — not just "planned"
     results = (
         db.query(PlanificareRezultat)
         .filter(PlanificareRezultat.sesiune_id == sesiune.id)
-        .filter(PlanificareRezultat.status == "planned")
+        .filter(PlanificareRezultat.resursa_id.isnot(None))
+        .filter(PlanificareRezultat.data_start.isnot(None))
         .all()
     )
-
-    # Shift schedules per resource per day
-    program_map: dict = defaultdict(dict)  # {resursa_id: {date: schimburi_str}}
-    for p in db.query(ProgramResursa).all():
-        program_map[p.resursa_id][p.data] = p.schimburi or ""
 
     # Cache comenzi
     comanda_cache: dict = {}
@@ -419,87 +416,100 @@ def get_board_data(db: Session = Depends(get_db)):
         if r.wo not in comanda_cache:
             comanda_cache[r.wo] = db.query(Comanda).filter(Comanda.cp == r.wo).first()
 
-    # Groups: only resources that have planned operations
-    resurse_ids = {r.resursa_id for r in results if r.resursa_id}
+    # Resources used in this session
+    resurse_ids = {r.resursa_id for r in results}
     resurse_map = {r.id: r for r in db.query(Resursa).filter(Resursa.id.in_(resurse_ids)).all()}
 
-    groups = []
-    for r in sorted(resurse_map.values(), key=lambda x: (x.cl, x.resursa)):
-        groups.append({"id": str(r.id), "content": r.resursa, "cl": r.cl})
+    # Build nested groups: CL parent → resource children
+    cl_to_res: dict = defaultdict(list)
+    sorted_resurse = sorted(resurse_map.values(), key=lambda x: (x.cl or "", x.resursa or ""))
+    for r in sorted_resurse:
+        cl_to_res[r.cl or "?"].append(str(r.id))
 
-    # Group planned ops by (resursa_id, day) to assign sequential hour-level times
-    ops_by_res_day: dict = defaultdict(list)
-    for r in results:
-        if r.resursa_id and r.data_start:
-            ops_by_res_day[(r.resursa_id, r.data_start.date())].append(r)
+    groups: list = []
+    for cl, res_ids in sorted(cl_to_res.items()):
+        groups.append({
+            "id": f"cl__{cl}",
+            "content": cl,
+            "nestedGroups": res_ids,
+            "cl": cl,
+            "isParent": True,
+        })
+    for r in sorted_resurse:
+        groups.append({
+            "id": str(r.id),
+            "content": r.resursa or str(r.id),
+            "cl": r.cl or "",
+            "isParent": False,
+        })
 
-    # Color palette by CL (center of work)
-    cl_colors = [
-        "#3b82f6","#06b6d4","#8b5cf6","#f59e0b","#10b981",
-        "#f97316","#ec4899","#6366f1","#14b8a6","#84cc16",
-    ]
-    cl_color_map: dict = {}
+    # 5-color logic (same semantics as Gantt)
+    def item_color(op: PlanificareRezultat, is_late: bool) -> str:
+        if op.frozen:
+            # portocaliu = frozen dar imposibil (fara material sau blocat de rank)
+            return "#ea580c" if op.status in ("Fara Material", "Blocat Rank") else "#7c3aed"
+        if op.status == "Fara BT":
+            return "#2563eb"   # albastru — previzionat
+        if is_late:
+            return "#dc2626"   # rosu — intarziat
+        return "#16a34a"       # verde — planificat, neintarziat
 
-    def get_cl_color(cl: str) -> str:
-        if cl not in cl_color_map:
-            cl_color_map[cl] = cl_colors[len(cl_color_map) % len(cl_colors)]
-        return cl_color_map[cl]
+    status_label_map = {
+        "planned":       "Planificat",
+        "Fara BT":       "Previzionat",
+        "Fara Material": "Fără Material",
+        "Blocat Rank":   "Blocat Rank",
+    }
 
-    items = []
-    item_id = 1
+    items: list = []
+    for op in results:
+        comanda = comanda_cache.get(op.wo)
+        delivery = None
+        if comanda:
+            delivery = comanda.data_actualizata_livrare or comanda.dt_livr_prod
 
-    for (res_id, day), ops in sorted(ops_by_res_day.items()):
-        # Determine shift start for this resource on this day
-        schimburi = program_map.get(res_id, {}).get(day, "")
-        shift_start_hour = 6  # default
-        if schimburi:
-            try:
-                shift_start_hour = int(schimburi.split(";")[0].split("-")[0])
-            except Exception:
-                pass
+        # Use planner's stored times directly (Varianta B — hour-level precision)
+        start_dt = op.data_start
+        end_dt = op.data_end
+        if not end_dt or (end_dt - start_dt).total_seconds() < 900:
+            end_dt = start_dt + timedelta(hours=max(op.durata_ore, 0.25))
 
-        current_dt = datetime.combine(day, datetime.min.time()) + timedelta(hours=shift_start_hour)
-        ops.sort(key=lambda o: o.id)  # preserve planner insertion order
+        is_late = bool(delivery and end_dt.date() > delivery)
+        color = item_color(op, is_late)
+        slabel = status_label_map.get(op.status or "", op.status or "?")
 
-        for op in ops:
-            comanda = comanda_cache.get(op.wo)
-            delivery = None
-            if comanda:
-                delivery = comanda.data_actualizata_livrare or comanda.dt_livr_prod
+        tooltip = (
+            f"<b>WO: {op.wo}</b><br>"
+            f"OP: {op.op} &nbsp;|&nbsp; CL: {op.cl}<br>"
+            f"Resursă: {op.resursa_nume or '-'}<br>"
+            f"Status: {slabel}" + (" 🔒" if op.frozen else "") + "<br>"
+            f"Durată: {op.durata_ore:.1f} h<br>"
+            f"Client: {comanda.client if comanda else '-'}<br>"
+            f"Articol: {(comanda.articol or '')[:60] if comanda else '-'}<br>"
+            f"Livrare: {delivery or '-'}"
+            + ("<br><span style='color:#dc2626;font-weight:bold'>⚠ ÎNTÂRZIAT</span>" if is_late else "")
+        )
 
-            start_dt = current_dt
-            end_dt = current_dt + timedelta(hours=max(op.durata_ore, 0.25))  # min 15min bar
-            current_dt = end_dt
-
-            is_late = bool(delivery and start_dt.date() > delivery)
-            color = "#dc2626" if is_late else get_cl_color(op.cl or "")
-
-            tooltip = (
-                f"<b>WO: {op.wo}</b><br>"
-                f"OP: {op.op} &nbsp;|&nbsp; CL: {op.cl}<br>"
-                f"Resursa: {op.resursa_nume or '-'}<br>"
-                f"Durata: {op.durata_ore:.1f} h<br>"
-                f"Client: {comanda.client if comanda else '-'}<br>"
-                f"Articol: {(comanda.articol or '')[:60] if comanda else '-'}<br>"
-                f"Data livrare: {delivery or '-'}"
-                + ("<br><span style='color:#dc2626;font-weight:bold'>⚠ ÎNTÂRZIAT</span>" if is_late else "")
-            )
-
-            items.append({
-                "id": item_id,
-                "group": str(res_id),
-                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                "content": f"WO:{op.wo} OP:{op.op}",
-                "title": tooltip,
-                "style": f"background-color:{color};border-color:{color};color:#fff;",
-                "wo": op.wo,
-                "op": op.op,
-                "cl": op.cl,
-                "durata_ore": op.durata_ore,
-                "late": is_late,
-            })
-            item_id += 1
+        items.append({
+            "id": op.id,                              # PlanificareRezultat.id — unique
+            "group": str(op.resursa_id),
+            "start": start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end": end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "content": f"WO:{op.wo} OP:{op.op}",
+            "title": tooltip,
+            "style": f"background-color:{color};border-color:{color};color:#fff;",
+            # Extra fields for frontend filtering & sidebar
+            "result_id": op.id,
+            "wo": op.wo,
+            "op": op.op,
+            "cl": op.cl or "",
+            "durata_ore": op.durata_ore,
+            "late": is_late,
+            "frozen": op.frozen,
+            "status": op.status or "",
+            "client": comanda.client if comanda else "",
+            "articol": comanda.articol if comanda else "",
+        })
 
     return {"groups": groups, "items": items}
 

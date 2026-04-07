@@ -81,6 +81,17 @@ svg.gantt {
   background-color: #ef4444 !important;
   width: 2px !important;
 }
+/* CL parent group label (nested groups header) */
+.board-cl-parent {
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 6px;
+  line-height: 1;
+}
+
 /* Group labels panel — fixed row height, no stretch */
 .vis-labelset .vis-label {
   border-bottom: 1px solid #e2e8f0 !important;
