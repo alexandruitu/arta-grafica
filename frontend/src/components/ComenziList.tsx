@@ -136,9 +136,10 @@ export default function ComenziList() {
     },
   ];
 
-  // Split cards: status (exclusive) vs subsets (transversal)
-  const statusCards  = overviewCards.slice(0, 4); // Total, 06, LIBER, STOP
-  const subsetCards  = overviewCards.slice(4);    // Întârziate
+  // Split cards: status (exclusive: LIBER+STOP=Total) vs subsets (transversal)
+  // statusCards: Total, LIBER, STOP  |  subsetCards: 06-În producție, Întârziate
+  const statusCards = [overviewCards[0], overviewCards[2], overviewCards[3]]; // Total, LIBER, STOP
+  const subsetCards = [overviewCards[1], overviewCards[4]];                   // 06-În producție, Întârziate
 
   return (
     <div className="space-y-4">
