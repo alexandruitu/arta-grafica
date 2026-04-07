@@ -783,7 +783,7 @@ def set_frozen(result_id: int, body: FrozenBody, db: Session = Depends(get_db)):
 @app.get("/api/stoc", response_model=List[StocArticol])
 def get_stoc(
     search: Optional[str] = Query(None),
-    limit: int = Query(50),
+    limit: int = Query(5000),
     db: Session = Depends(get_db),
 ):
     # B-type = reservations (negative cantitate)
@@ -802,15 +802,16 @@ def get_stoc(
     if search:
         q = q.filter(Deficit.articol.ilike(f"%{search}%"))
 
-    results = q.limit(limit).all()
+    results = q.order_by(Deficit.articol).limit(limit).all()
     return [
         StocArticol(
             articol=r[0],
             sold_actual=r[1] or 0,
-            total_rezervat=r[2] or 0,
+            # B-type cantitate values are negative in DB; store as positive magnitude
+            total_rezervat=abs(r[2] or 0),
             total_aprovizionare=r[3] or 0,
-            disponibil=(r[1] or 0) + (r[2] or 0),
-            disponibil_final=(r[1] or 0) + (r[2] or 0) + (r[3] or 0),
+            disponibil=(r[1] or 0) - abs(r[2] or 0),
+            disponibil_final=(r[1] or 0) - abs(r[2] or 0) + (r[3] or 0),
         )
         for r in results
     ]
