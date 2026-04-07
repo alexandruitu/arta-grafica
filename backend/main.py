@@ -523,12 +523,12 @@ def get_board_data(db: Session = Depends(get_db)):
     return {"groups": groups, "items": items}
 
 
-@app.get("/api/planificare/operatii", response_model=List[PlanificareOut])
+@app.get("/api/planificare/operatii")
 def get_planning_results(
     cl: Optional[str] = Query(None),
     wo: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
-    limit: int = Query(200),
+    limit: int = Query(5000),   # high default — client-side filtering handles the rest
     offset: int = Query(0),
     db: Session = Depends(get_db),
 ):
@@ -542,8 +542,43 @@ def get_planning_results(
     if wo:
         q = q.filter(PlanificareRezultat.wo == wo)
     if status:
-        q = q.filter(PlanificareRezultat.status == status)
-    return q.offset(offset).limit(limit).all()
+        # "previzionat" as a filter value matches all previzionat sub-types
+        if status == "previzionat":
+            q = q.filter(PlanificareRezultat.status.in_(list(PREVIZIONAT_STATUSES)))
+        else:
+            q = q.filter(PlanificareRezultat.status == status)
+
+    rows = q.order_by(PlanificareRezultat.data_start.asc().nullslast()).offset(offset).limit(limit).all()
+
+    # Enrich with client + articol from Comanda (batch lookup)
+    wo_ids = {r.wo for r in rows}
+    comanda_map: dict[int, Comanda] = {
+        c.cp: c for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()
+    }
+
+    result = []
+    for r in rows:
+        c = comanda_map.get(r.wo)
+        result.append({
+            "id":           r.id,
+            "sesiune_id":   r.sesiune_id,
+            "dispatch_id":  r.dispatch_id,
+            "wo":           r.wo,
+            "op":           r.op,
+            "cl":           r.cl,
+            "resursa_id":   r.resursa_id,
+            "resursa_nume": r.resursa_nume,
+            "data_start":   r.data_start.isoformat() if r.data_start else None,
+            "data_end":     r.data_end.isoformat()   if r.data_end   else None,
+            "durata_ore":   r.durata_ore,
+            "frozen":       r.frozen,
+            "status":       r.status,
+            "motiv":        r.motiv,
+            # enriched
+            "client":       c.client  if c else None,
+            "articol":      c.articol if c else None,
+        })
+    return result
 
 
 @app.get("/api/planificare/stats")

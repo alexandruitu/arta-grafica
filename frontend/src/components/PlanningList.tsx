@@ -2,13 +2,58 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import AIAssistant from './AIAssistant';
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('ro-RO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  planned:              'Planificat',
+  previzionat_bt:       'Previzionat (fără BT)',
+  previzionat_material: 'Previzionat (fără mat.)',
+  no_material:          'Fără Material',
+  no_resource:          'Fără Resursă',
+  blocked_by_rank:      'Blocat Rank',
+  no_bt:                'Fără BT',
+};
+
+const STATUS_STYLE: Record<string, string> = {
+  planned:              'bg-green-100 text-green-700',
+  previzionat_bt:       'bg-blue-100 text-blue-700',
+  previzionat_material: 'bg-cyan-100 text-cyan-700',
+  no_material:          'bg-red-100 text-red-700',
+  no_resource:          'bg-slate-100 text-slate-600',
+  blocked_by_rank:      'bg-amber-100 text-amber-700',
+  no_bt:                'bg-orange-100 text-orange-700',
+};
+
+const PREVIZIONAT_SET = new Set(['previzionat_bt', 'previzionat_material']);
+const PLACED_SET      = new Set(['planned', 'previzionat_bt', 'previzionat_material']);
+
+function statusBadge(status: string) {
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLE[status] ?? 'bg-slate-100 text-slate-600'}`}>
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  );
+}
+
+// ── component ─────────────────────────────────────────────────────────────────
+
 export default function PlanningList() {
-  const [results, setResults] = useState<any[]>([]);
-  const [centreLucru, setCentreLucru] = useState<any[]>([]);
-  const [selectedCL, setSelectedCL] = useState('');
+  const [allResults,    setAllResults]    = useState<any[]>([]);
+  const [centreLucru,   setCentreLucru]   = useState<any[]>([]);
+  const [selectedCL,    setSelectedCL]    = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [serverStats, setServerStats] = useState<Record<string, number>>({});
+  const [search,        setSearch]        = useState('');
+  const [loading,       setLoading]       = useState(false);
+  const [serverStats,   setServerStats]   = useState<Record<string, number>>({});
 
   useEffect(() => {
     api.getCentreLucru().then(setCentreLucru).catch(() => {});
@@ -17,225 +62,224 @@ export default function PlanningList() {
 
   const loadResults = async () => {
     setLoading(true);
-    const params: Record<string, string> = { limit: '300' };
+    // Only server-side filter by CL (stable, high-cardinality).
+    // Status + search are applied client-side for instant response.
+    const params: Record<string, string> = {};
     if (selectedCL) params.cl = selectedCL;
-    if (selectedStatus) params.status = selectedStatus;
     try {
       const data = await api.getPlanningOperatii(params);
-      setResults(data);
-      // Refresh server stats after any load (in case planning was re-run)
+      setAllResults(data);
       api.getPlanningStats().then(setServerStats).catch(() => {});
-    } catch { setResults([]); }
+    } catch { setAllResults([]); }
     setLoading(false);
   };
 
-  useEffect(() => { loadResults(); }, [selectedCL, selectedStatus]);
+  useEffect(() => { loadResults(); }, [selectedCL]);
 
-  const oreTotal = useMemo(() => {
-    return results
-      .filter(r => r.status === 'planned' || r.status === 'previzionat')
-      .reduce((s, r) => s + (r.durata_ore || 0), 0);
-  }, [results]);
+  // ── Client-side filtering ──────────────────────────────────────────────────
+  const filteredResults = useMemo(() => {
+    const s = search.toLowerCase().trim();
+    return allResults.filter(r => {
+      // Status filter — "previzionat" matches both sub-types
+      if (selectedStatus) {
+        if (selectedStatus === 'previzionat') {
+          if (!PREVIZIONAT_SET.has(r.status)) return false;
+        } else {
+          if (r.status !== selectedStatus) return false;
+        }
+      }
+      // Search contains: WO (numeric string), client, articol
+      if (s) {
+        const woMatch     = String(r.wo).includes(s);
+        const clientMatch = (r.client  || '').toLowerCase().includes(s);
+        const artMatch    = (r.articol || '').toLowerCase().includes(s);
+        if (!woMatch && !clientMatch && !artMatch) return false;
+      }
+      return true;
+    });
+  }, [allResults, selectedStatus, search]);
 
-  // Stats from server (accurate totals), with ore from loaded results
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const oreTotal = useMemo(
+    () => filteredResults.filter(r => PLACED_SET.has(r.status)).reduce((s, r) => s + (r.durata_ore || 0), 0),
+    [filteredResults]
+  );
+
   const stats = {
-    total:       serverStats.total        ?? results.length,
-    planned:     serverStats.planned      ?? 0,
-    previzionat: serverStats.previzionat  ?? 0,
-    no_material: serverStats.no_material  ?? 0,
+    total:       serverStats.total           ?? allResults.length,
+    planned:     serverStats.planned         ?? 0,
+    previzionat: serverStats.previzionat     ?? 0,
+    no_material: serverStats.no_material     ?? 0,
+    no_bt:       serverStats.no_bt           ?? 0,
     blocked:     serverStats.blocked_by_rank ?? 0,
-    no_bt:       serverStats.no_bt        ?? 0,
-    no_resource: serverStats.no_resource  ?? 0,
+    no_resource: serverStats.no_resource     ?? 0,
     ore:         oreTotal,
   };
 
   const handleToggleFrozen = async (id: number, currentFrozen: boolean) => {
     try {
       await api.toggleFrozen(id, !currentFrozen);
-      setResults(prev => prev.map(r => r.id === id ? { ...r, frozen: !currentFrozen } : r));
+      setAllResults(prev => prev.map(r => r.id === id ? { ...r, frozen: !currentFrozen } : r));
     } catch {
       alert('Nu s-a putut schimba starea frozen.');
     }
   };
 
-  const statusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      planned: 'bg-green-100 text-green-700',
-      previzionat: 'bg-blue-100 text-blue-700',
-      no_material: 'bg-red-100 text-red-700',
-      no_resource: 'bg-slate-100 text-slate-700',
-      blocked_by_rank: 'bg-amber-100 text-amber-700',
-      no_bt: 'bg-orange-100 text-orange-700',
-    };
-    const labels: Record<string, string> = {
-      planned: 'Planificat',
-      previzionat: 'Previzionat',
-      no_material: 'Fara Material',
-      no_resource: 'Fara Resursa',
-      blocked_by_rank: 'Blocat Rank',
-      no_bt: 'Fara BT',
-    };
-    return (
-      <span className={`px-2 py-0.5 rounded text-xs ${styles[status] || 'bg-slate-100'}`}>
-        {labels[status] || status}
-      </span>
-    );
-  };
+  const toggleStatusFilter = (s: string) =>
+    setSelectedStatus(prev => (prev === s ? '' : s));
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      <div className="flex gap-3 items-center">
-        <select
-          value={selectedCL}
-          onChange={e => setSelectedCL(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm"
-        >
+
+      {/* ── Toolbar ── */}
+      <div className="flex flex-wrap gap-2 items-center">
+        {/* CL filter */}
+        <select value={selectedCL} onChange={e => setSelectedCL(e.target.value)}
+          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
           <option value="">Toate centrele de lucru</option>
           {centreLucru.map(cl => (
-            <option key={cl.cl} value={cl.cl}>{cl.cl} - {cl.denumire}</option>
+            <option key={cl.cl} value={cl.cl}>{cl.cl} – {cl.denumire}</option>
           ))}
         </select>
-        <select
-          value={selectedStatus}
-          onChange={e => setSelectedStatus(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm"
-        >
+
+        {/* Status filter */}
+        <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)}
+          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
           <option value="">Toate statusurile</option>
           <option value="planned">Planificat</option>
-          <option value="previzionat">Previzionat</option>
-          <option value="no_material">Fara Material</option>
-          <option value="no_resource">Fara Resursa</option>
+          <option value="previzionat">Previzionat (toate)</option>
+          <option value="previzionat_bt">Previzionat – fără BT</option>
+          <option value="previzionat_material">Previzionat – fără material</option>
+          <option value="no_material">Fără Material (blocat)</option>
+          <option value="no_resource">Fără Resursă</option>
           <option value="blocked_by_rank">Blocat Rank</option>
-          <option value="no_bt">Fara BT</option>
+          <option value="no_bt">Fără BT (blocat)</option>
         </select>
+
+        {/* Search */}
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Caută WO, client, articol…"
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-56" />
+
+        <button onClick={loadResults}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium">
+          ↺ Reîncarcă
+        </button>
+
+        <span className="ml-auto text-xs text-slate-400">
+          {filteredResults.length} / {allResults.length} operații
+        </span>
       </div>
 
-      {/* AI Assistant — sus */}
+      {/* ── AI Assistant ── */}
       <AIAssistant tab="planificare" />
 
-      {/* Stats cards — reflect current filter */}
-      {results.length > 0 && (
+      {/* ── Stats cards (clickable) ── */}
+      {allResults.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500 mb-0.5">Total afișate</p>
+            <p className="text-xs text-slate-500 mb-0.5">Total sesiune</p>
             <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
             <p className="text-xs text-slate-400">operații</p>
           </div>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'planned' ? '' : 'planned')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'planned' ? 'bg-green-100 border-green-400' : 'bg-white border-slate-200 hover:bg-green-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Planificate</p>
-            <p className="text-2xl font-bold text-green-700">{stats.planned}</p>
-            <p className="text-xs text-slate-400">{stats.ore.toFixed(0)} ore totale</p>
-          </button>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'previzionat' ? '' : 'previzionat')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'previzionat' ? 'bg-blue-100 border-blue-400' : 'bg-white border-slate-200 hover:bg-blue-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Previzionate</p>
-            <p className="text-2xl font-bold text-blue-600">{stats.previzionat}</p>
-            <p className="text-xs text-slate-400">programate viitor</p>
-          </button>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'no_material' ? '' : 'no_material')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_material' ? 'bg-red-100 border-red-400' : 'bg-white border-slate-200 hover:bg-red-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Fara Material</p>
-            <p className="text-2xl font-bold text-red-600">{stats.no_material}</p>
-            <p className="text-xs text-slate-400">stoc insuficient</p>
-          </button>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'no_bt' ? '' : 'no_bt')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_bt' ? 'bg-orange-100 border-orange-400' : 'bg-white border-slate-200 hover:bg-orange-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Fara BT</p>
-            <p className="text-2xl font-bold text-orange-600">{stats.no_bt}</p>
-            <p className="text-xs text-slate-400">bun de tipar</p>
-          </button>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'blocked_by_rank' ? '' : 'blocked_by_rank')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'blocked_by_rank' ? 'bg-amber-100 border-amber-400' : 'bg-white border-slate-200 hover:bg-amber-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Blocate Rank</p>
-            <p className="text-2xl font-bold text-amber-600">{stats.blocked}</p>
-            <p className="text-xs text-slate-400">asteapta predec.</p>
-          </button>
-          <button
-            onClick={() => setSelectedStatus(selectedStatus === 'no_resource' ? '' : 'no_resource')}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${selectedStatus === 'no_resource' ? 'bg-slate-200 border-slate-400' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
-          >
-            <p className="text-xs text-slate-500 mb-0.5">Fara Resursa</p>
-            <p className="text-2xl font-bold text-slate-600">{stats.no_resource}</p>
-            <p className="text-xs text-slate-400">nemapate</p>
-          </button>
+
+          {[
+            { key: 'planned',        label: 'Planificate',    value: stats.planned,     color: 'green',  sub: `${stats.ore.toFixed(0)} ore` },
+            { key: 'previzionat',    label: 'Previzionate',   value: stats.previzionat, color: 'blue',   sub: 'programate viitor' },
+            { key: 'no_material',    label: 'Fără Material',  value: stats.no_material, color: 'red',    sub: 'stoc insuficient' },
+            { key: 'no_bt',          label: 'Fără BT',        value: stats.no_bt,       color: 'orange', sub: 'bun de tipar' },
+            { key: 'blocked_by_rank',label: 'Blocate Rank',   value: stats.blocked,     color: 'amber',  sub: 'aşteaptă predec.' },
+            { key: 'no_resource',    label: 'Fără Resursă',   value: stats.no_resource, color: 'slate',  sub: 'nemapate' },
+          ].map(({ key, label, value, color, sub }) => {
+            const active = selectedStatus === key;
+            return (
+              <button key={key} onClick={() => toggleStatusFilter(key)}
+                className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                  active
+                    ? `bg-${color}-100 border-${color}-400`
+                    : `bg-white border-slate-200 hover:bg-${color}-50`
+                }`}>
+                <p className="text-xs text-slate-500 mb-0.5">{label}</p>
+                <p className={`text-2xl font-bold text-${color}-${color === 'slate' ? '600' : '700'}`}>{value}</p>
+                <p className="text-xs text-slate-400">{sub}</p>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {loading && <p className="text-slate-500 text-sm">Se incarca...</p>}
+      {loading && <p className="text-slate-500 text-sm">Se încarcă…</p>}
 
+      {/* ── Table ── */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
                 <th className="px-3 py-2 text-left">WO</th>
                 <th className="px-3 py-2 text-left">OP</th>
                 <th className="px-3 py-2 text-left">CL</th>
-                <th className="px-3 py-2 text-left">Resursa</th>
+                <th className="px-3 py-2 text-left">Resursă</th>
+                <th className="px-3 py-2 text-left">Client</th>
+                <th className="px-3 py-2 text-left">Articol</th>
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Freeze</th>
-                <th className="px-3 py-2 text-left">Start</th>
-                <th className="px-3 py-2 text-left">End</th>
-                <th className="px-3 py-2 text-right">Durata (h)</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Start</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Stop</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Durata (h)</th>
                 <th className="px-3 py-2 text-left">Motiv</th>
               </tr>
             </thead>
             <tbody>
-              {results.map((r, i) => (
-                <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2 font-mono">{r.wo}</td>
-                  <td className="px-3 py-2 font-mono">{r.op}</td>
-                  <td className="px-3 py-2">{r.cl}</td>
-                  <td className="px-3 py-2">{r.resursa_nume || '-'}</td>
+              {filteredResults.map((r, i) => (
+                <tr key={r.id ?? i} className="border-b border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-2 font-mono text-xs">{r.wo}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{r.op}</td>
+                  <td className="px-3 py-2 text-xs">{r.cl}</td>
+                  <td className="px-3 py-2 text-xs">{r.resursa_nume || '—'}</td>
+                  <td className="px-3 py-2 text-xs max-w-[120px] truncate" title={r.client}>
+                    {r.client || '—'}
+                  </td>
+                  <td className="px-3 py-2 text-xs max-w-[160px] truncate" title={r.articol}>
+                    {r.articol || '—'}
+                  </td>
                   <td className="px-3 py-2">
                     {r.frozen && <span className="text-purple-400 mr-1 text-xs">❄</span>}
                     {statusBadge(r.status)}
                   </td>
                   <td className="px-3 py-2">
-                    {(r.status === 'planned' || r.status === 'previzionat') ? (
+                    {PLACED_SET.has(r.status) ? (
                       <button
-                        onClick={e => { e.stopPropagation(); handleToggleFrozen(r.id, r.frozen); }}
+                        onClick={() => handleToggleFrozen(r.id, r.frozen)}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
                           r.frozen
                             ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
-                        title={r.frozen ? 'Unfreeze operatie' : 'Freeze operatie (fixeaza pozitia)'}
+                        title={r.frozen ? 'Unfreeze' : 'Freeze (fixează poziția)'}
                       >
                         {r.frozen ? '❄ Frozen' : 'Freeze'}
                       </button>
                     ) : (
-                      <span className="text-slate-300 text-xs">-</span>
+                      <span className="text-slate-300 text-xs">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.data_start ? new Date(r.data_start).toLocaleDateString('ro-RO') : '-'}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.data_end ? new Date(r.data_end).toLocaleDateString('ro-RO') : '-'}
-                  </td>
-                  <td className="px-3 py-2 text-right">{r.durata_ore?.toFixed(1)}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500 min-w-[320px]">
-                    {r.motiv || '-'}
-                  </td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDateTime(r.data_start)}</td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDateTime(r.data_end)}</td>
+                  <td className="px-3 py-2 text-right text-xs">{r.durata_ore?.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-xs text-slate-500 min-w-[280px]">{r.motiv || '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {results.length === 0 && !loading && (
-          <p className="text-center py-8 text-slate-400">Nicio planificare. Ruleaza din Dashboard.</p>
+        {filteredResults.length === 0 && !loading && (
+          <p className="text-center py-8 text-slate-400">
+            {allResults.length === 0
+              ? 'Nicio planificare. Rulează din Dashboard.'
+              : 'Niciun rezultat pentru filtrele aplicate.'}
+          </p>
         )}
       </div>
     </div>
