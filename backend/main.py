@@ -251,7 +251,8 @@ def get_latest_planning(db: Session = Depends(get_db)):
 @app.get("/api/planificare/gantt", response_model=List[GanttTask])
 def get_gantt_data(
     cl: Optional[str] = Query(None),
-    wo: Optional[int] = Query(None),
+    wo: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
@@ -265,8 +266,6 @@ def get_gantt_data(
     )
     if cl:
         q = q.filter(PlanificareRezultat.cl == cl)
-    if wo:
-        q = q.filter(PlanificareRezultat.wo == wo)
 
     results = q.all()
     if not results:
@@ -280,6 +279,32 @@ def get_gantt_data(
         c.cp: c
         for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()
     }
+
+    # WO "contains" filter (applied after comanda_map is built so we can also
+    # apply the client/articol search in the same pass)
+    if wo:
+        results = [r for r in results if wo.lower() in str(r.wo).lower()]
+    if search:
+        search_lower = search.lower()
+        def _matches_search(r):
+            if search_lower in str(r.wo).lower():
+                return True
+            c = comanda_map.get(r.wo)
+            if c:
+                if c.client and search_lower in c.client.lower():
+                    return True
+                if c.articol and search_lower in c.articol.lower():
+                    return True
+            return False
+        results = [r for r in results if _matches_search(r)]
+
+    if not results:
+        return []
+
+    # Recompute wo_ids / op_ids after optional filtering
+    wo_ids = {r.wo for r in results}
+    op_ids = {str(r.op) for r in results}
+
     operatie_map: dict = {
         o.cod: o
         for o in db.query(Operatie).filter(Operatie.cod.in_(op_ids)).all()
@@ -304,13 +329,15 @@ def get_gantt_data(
             continue
 
         comanda = comanda_map.get(r.wo)
-        custom_class = "bar-planned"
-        if comanda:
-            delivery = comanda.data_actualizata_livrare or comanda.dt_livr_prod
-            if delivery and r.data_end.date() > delivery:
-                custom_class = "bar-late"
-            elif r.frozen:
-                custom_class = "bar-frozen"
+        delivery = (comanda.data_actualizata_livrare or comanda.dt_livr_prod) if comanda else None
+        is_late = bool(delivery and r.data_end.date() > delivery)
+
+        if r.frozen:
+            custom_class = "bar-frozen-late" if is_late else "bar-frozen-ok"
+        elif r.status == "previzionat":
+            custom_class = "bar-late" if is_late else "bar-previzionat"
+        else:
+            custom_class = "bar-late" if is_late else "bar-planned"
 
         # Dependency computation using pre-loaded data.
         deps = []
@@ -357,6 +384,8 @@ def get_gantt_data(
             cl=r.cl,
             resursa=r.resursa_nume,
             status=r.status,
+            client=comanda.client if comanda else None,
+            articol=comanda.articol if comanda else None,
         ))
 
     # Sort by WO then by planned start date so rank order is visible in Gantt rows
@@ -619,6 +648,61 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
         }
 
     return summaries
+
+
+@app.patch("/api/planificare/operatii/{result_id}/start")
+def set_start(result_id: int, body: dict, db: Session = Depends(get_db)):
+    """Set manual start time and auto-freeze the operation. Keeps duration unchanged."""
+    from datetime import timedelta as _td
+    r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
+    if r.status not in ("planned", "previzionat"):
+        raise HTTPException(status_code=400, detail=f"Doar operatiile planificate pot fi modificate (status: {r.status})")
+    data_start_str = body.get("data_start", "")
+    try:
+        new_start = datetime.strptime(data_start_str, "%Y-%m-%d %H:%M")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format invalid. Foloseste: YYYY-MM-DD HH:MM")
+    r.data_start = new_start
+    r.data_end = new_start + _td(hours=float(r.durata_ore))
+    r.frozen = True
+    db.commit()
+    return {
+        "id": r.id, "frozen": r.frozen,
+        "data_start": r.data_start.strftime("%Y-%m-%d %H:%M"),
+        "data_end": r.data_end.strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+@app.get("/api/planificare/frozen")
+def get_frozen(db: Session = Depends(get_db)):
+    """List all frozen operations from the latest completed session."""
+    sesiune = (
+        db.query(PlanificareSesiune)
+        .filter(PlanificareSesiune.status == "completed")
+        .order_by(PlanificareSesiune.id.desc())
+        .first()
+    )
+    if not sesiune:
+        return []
+    frozen = db.query(PlanificareRezultat).filter(
+        PlanificareRezultat.sesiune_id == sesiune.id,
+        PlanificareRezultat.frozen == True,
+    ).order_by(PlanificareRezultat.data_start).all()
+    wo_ids = {r.wo for r in frozen}
+    cm = {c.cp: c for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()} if wo_ids else {}
+    return [
+        {
+            "id": r.id, "wo": r.wo, "op": r.op, "cl": r.cl,
+            "resursa_nume": r.resursa_nume, "durata_ore": r.durata_ore,
+            "data_start": r.data_start.strftime("%Y-%m-%d %H:%M") if r.data_start else None,
+            "data_end": r.data_end.strftime("%Y-%m-%d %H:%M") if r.data_end else None,
+            "client": cm.get(r.wo).client if cm.get(r.wo) else None,
+            "articol": cm.get(r.wo).articol if cm.get(r.wo) else None,
+        }
+        for r in frozen
+    ]
 
 
 @app.patch("/api/planificare/operatii/{result_id}/frozen")

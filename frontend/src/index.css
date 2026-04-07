@@ -99,8 +99,12 @@ svg.gantt {
 
 /* Frappe Gantt overrides */
 .gantt-container .bar-planned .bar-progress,
-.gantt-container .bar-planned .bar { fill: #3b82f6 !important; }
+.gantt-container .bar-planned .bar { fill: #16a34a !important; }      /* verde – planificat, neintarziat */
+.gantt-container .bar-previzionat .bar-progress,
+.gantt-container .bar-previzionat .bar { fill: #2563eb !important; }   /* albastru – previzionat (fara BT) */
+.gantt-container .bar-frozen-ok .bar-progress,
+.gantt-container .bar-frozen-ok .bar { fill: #7c3aed !important; }     /* mov – frozen, incadrat in termen */
+.gantt-container .bar-frozen-late .bar-progress,
+.gantt-container .bar-frozen-late .bar { fill: #ea580c !important; }   /* portocaliu – frozen, depasit termen */
 .gantt-container .bar-late .bar-progress,
-.gantt-container .bar-late .bar { fill: #dc2626 !important; }
-.gantt-container .bar-frozen .bar-progress,
-.gantt-container .bar-frozen .bar { fill: #6366f1 !important; }
+.gantt-container .bar-late .bar { fill: #dc2626 !important; }          /* rosu – intarziat */

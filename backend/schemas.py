@@ -82,6 +82,8 @@ class GanttTask(BaseModel):
     cl: Optional[str] = None
     resursa: Optional[str] = None
     status: str
+    client: Optional[str] = None
+    articol: Optional[str] = None
 
 
 class ResursaOut(BaseModel):

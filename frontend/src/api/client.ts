@@ -115,6 +115,12 @@ export const api = {
       `/planificare/operatii/${resultId}/frozen`,
       { method: 'PATCH', body: JSON.stringify({ frozen }) }
     ),
+  setOperatieStart: (resultId: number, data_start: string) =>
+    request<{ id: number; frozen: boolean; data_start: string; data_end: string }>(
+      `/planificare/operatii/${resultId}/start`,
+      { method: 'PATCH', body: JSON.stringify({ data_start }) }
+    ),
+  getFrozenOps: () => request<any[]>('/planificare/frozen'),
 
   // Stoc
   getStoc: (search?: string) => {
