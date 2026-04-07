@@ -265,6 +265,21 @@ def run_planning(db: Session) -> dict:
     for art in artikel_arrivals:
         artikel_arrivals[art].sort(key=lambda x: x[0])
 
+    # ── Step 4c: Build prefabricat map ────────────────────────────────────────
+    # prefabricat_map[articol] = [wo_producator, ...]
+    # Prefabricatele sunt articole produse de WO-uri interne (A-type cu
+    # rezervat_in continand "COMAND" si "LUCRU"), nu cumparate de la furnizori.
+    prefabricat_map: dict[str, list[int]] = {}
+    for d in db.query(Deficit).filter(
+        Deficit.tip_rezervare == "A",
+        Deficit.rezervat_in.ilike("%COMAND%LUCRU%"),
+        Deficit.pe_comanda.isnot(None),
+    ).all():
+        if d.articol:
+            wos = prefabricat_map.setdefault(d.articol, [])
+            if d.pe_comanda not in wos:
+                wos.append(d.pe_comanda)
+
     # ── Step 5: Operation capability map per resource ────────────────────────
     resursa_operatii: dict[int, set[str]] = {}
     for r in resurse:
@@ -276,9 +291,10 @@ def run_planning(db: Session) -> dict:
     # ── Step 6: Plan operations ───────────────────────────────────────────────
     stats = {
         "planned": 0,
-        "previzionat_bt": 0,       # previzionat: fara BT dar cu data_limita_bt
-        "previzionat_material": 0, # previzionat: fara material dar cu aprovizionare
+        "previzionat_bt": 0,          # previzionat: fara BT dar cu data_limita_bt
+        "previzionat_material": 0,    # previzionat: fara material dar cu aprovizionare
         "no_material": 0,
+        "blocat_prefabricat": 0,      # material lipsa dar produs de un WO intern
         "no_resource": 0,
         "blocked_by_rank": 0,
         "no_bt": 0,
@@ -338,10 +354,19 @@ def run_planning(db: Session) -> dict:
                     mat_date = arr_date
                     break
             if mat_date is None:
-                wo_block = (
-                    "no_material",
-                    f"Stoc insuficient {art}: disponibil={available:.0f}, necesar={cantitate_needed:.0f}, aprovizionare insuficienta",
-                )
+                # Check if the missing article is a prefabricat (produced by another WO)
+                producer_wos = prefabricat_map.get(art, [])
+                if producer_wos:
+                    wos_str = ",".join(str(w) for w in producer_wos)
+                    wo_block = (
+                        "blocat_prefabricat",
+                        f"prefabricat:{wos_str}:{art}",
+                    )
+                else:
+                    wo_block = (
+                        "no_material",
+                        f"Stoc insuficient {art}: disponibil={available:.0f}, necesar={cantitate_needed:.0f}, aprovizionare insuficienta",
+                    )
             else:
                 new_start = mat_date
                 wo_previzionat_start = max(wo_previzionat_start, new_start) if wo_previzionat_start else new_start

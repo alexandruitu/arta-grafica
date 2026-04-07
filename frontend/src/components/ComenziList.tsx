@@ -353,9 +353,20 @@ export default function ComenziList() {
                                     previzionat_material: 'text-blue-600',
                                     previzionat: 'text-blue-600',
                                     no_material: 'text-red-500',
+                                    blocat_prefabricat: 'text-amber-600',
                                     no_resource: 'text-orange-500',
                                     no_bt: 'text-amber-500',
                                     blocked_by_rank: 'text-slate-500',
+                                  };
+                                  const statusLabels: Record<string, string> = {
+                                    planned: 'Planificat',
+                                    previzionat_bt: 'Previzionat BT',
+                                    previzionat_material: 'Previzionat Mat.',
+                                    no_material: 'Fără Material',
+                                    blocat_prefabricat: 'Blocat Prefabricat',
+                                    no_resource: 'Fără Resursă',
+                                    no_bt: 'Fără BT',
+                                    blocked_by_rank: 'Blocat Rank',
                                   };
                                   const hasCoada = op.coada_lungime > 0;
                                   const coadaOpen = expandedOpCoada === i;
@@ -377,7 +388,28 @@ export default function ComenziList() {
                                     <td className="py-1 font-mono">{op.data_start_plan || '-'}</td>
                                     <td className="py-1 font-mono">{op.data_end_plan || '-'}</td>
                                     <td className={`py-1 text-xs ${statusColors[op.status_plan] || 'text-slate-400'}`}>
-                                      {op.status_plan || '-'}
+                                      {statusLabels[op.status_plan] || op.status_plan || '-'}
+                                      {op.prefabricat_info && (
+                                        <div className="mt-0.5 text-[10px] text-amber-700 leading-tight">
+                                          <span className="font-mono block truncate max-w-[140px]" title={op.prefabricat_info.articol}>
+                                            {op.prefabricat_info.articol}
+                                          </span>
+                                          {op.prefabricat_info.producatori.map((p: any) => (
+                                            <span key={p.wo} className="flex items-center gap-1 mt-0.5">
+                                              <span>⛓</span>
+                                              <span className="font-mono">WO {p.wo}</span>
+                                              <span className={`px-1 rounded ${
+                                                p.status === 'planned' || p.status === 'previzionat_bt' || p.status === 'previzionat_material'
+                                                  ? 'bg-green-100 text-green-700'
+                                                  : p.status === 'neplanificat'
+                                                  ? 'bg-slate-100 text-slate-500'
+                                                  : 'bg-red-100 text-red-600'
+                                              }`}>{statusLabels[p.status] || p.status}</span>
+                                              {p.data_end && <span className="text-slate-400">→ {p.data_end.slice(0, 10)}</span>}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="py-1">
                                       {hasCoada ? (

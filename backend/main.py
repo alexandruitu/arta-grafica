@@ -209,6 +209,38 @@ def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
             # Sort by start time
             coada.sort(key=lambda x: x["start"])
 
+        # Parse prefabricat info when the op is blocked by a prefabricat
+        prefabricat_info = None
+        if r and r.status == "blocat_prefabricat" and r.motiv and r.motiv.startswith("prefabricat:"):
+            parts = r.motiv.split(":", 2)  # ["prefabricat", "wo1,wo2", "stock_code"]
+            try:
+                producer_wos = [int(w) for w in parts[1].split(",") if w]
+                articol_prefabricat = parts[2] if len(parts) > 2 else None
+                producatori = []
+                if sesiune:
+                    for pwo in producer_wos:
+                        prod_result = (
+                            db.query(PlanificareRezultat)
+                            .filter(
+                                PlanificareRezultat.sesiune_id == sesiune.id,
+                                PlanificareRezultat.wo == pwo,
+                            )
+                            .order_by(PlanificareRezultat.data_end.desc().nullslast())
+                            .first()
+                        )
+                        producatori.append({
+                            "wo": pwo,
+                            "status": prod_result.status if prod_result else "neplanificat",
+                            "data_end": prod_result.data_end.strftime("%Y-%m-%d %H:%M")
+                                        if prod_result and prod_result.data_end else None,
+                        })
+                prefabricat_info = {
+                    "articol": articol_prefabricat,
+                    "producatori": producatori,
+                }
+            except (IndexError, ValueError):
+                pass
+
         result.append({
             "id": op.id, "cl": op.cl, "wo": op.wo, "op": op.op,
             "descr_op": op.descr_op, "stock_code": op.stock_code,
@@ -222,6 +254,7 @@ def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
             "resursa_plan": r.resursa_nume if r else None,
             "coada_lungime": len(coada),
             "coada": coada,
+            "prefabricat_info": prefabricat_info,
         })
     return result
 

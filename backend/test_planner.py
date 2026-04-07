@@ -890,3 +890,172 @@ class TestStockTrackerInitialization:
             f"WO 8002: expected no_material, got {r2.status}. "
             f"Cross-WO stock depletion is broken."
         )
+
+
+class TestPrefabricatDetection:
+    """
+    Test that the planner distinguishes between:
+    - no_material: missing purchased article (no internal producer WO)
+    - blocat_prefabricat: missing article that is produced by another WO internally
+    """
+
+    def _setup_base(self, db):
+        """Common setup: one resource available for 3 days."""
+        r = make_resursa("CL1", "Masina1")
+        db.add(r)
+        db.flush()
+        today = date.today()
+        for i in range(3):
+            db.add(make_program(r, today + timedelta(days=i), 8.0))
+        db.add(make_operatie(10, rank=1))
+        return r
+
+    def test_prefabricat_gives_blocat_prefabricat_status(self, db):
+        """
+        Article ART-PREF is produced internally by WO 9001 (A-type, COMANDA LUCRU).
+        WO 9002 needs ART-PREF but stock=0 and no supply arrives.
+        Expected: WO 9002 → blocat_prefabricat (not no_material).
+        The motiv should contain the producer WO number.
+        """
+        self._setup_base(db)
+
+        # Producer WO (just needs to be referenced in the Deficit A-type entry)
+        c_producer = make_comanda(9001, bt1=None, bt2=None, bt3=None, bt4=None)
+        # Consumer WO
+        c_consumer = make_comanda(9002)
+        db.add_all([c_producer, c_consumer])
+        db.flush()
+
+        # Dispatch for consumer only (producer WO has no dispatch → won't be planned)
+        db.add(make_dispatch(9002, 10, "CL1", p_setup=0.0, p_runtime=2.0))
+
+        # A-type entry: WO 9001 produces ART-PREF internally
+        db.add(Deficit(
+            articol="ART-PREF",
+            sold_actual=0.0,
+            cantitate=500.0,
+            la_data=None,
+            pentru="productie",
+            pe_comanda=9001,
+            tiraj_comandat=500,
+            tiraj_realizat=0,
+            rezervat_in="* COMANDĂ LUCRU *",
+            tip_rezervare="A",
+        ))
+        # B-type entry: WO 9002 needs ART-PREF (stock=0)
+        db.add(Deficit(
+            articol="ART-PREF",
+            sold_actual=0.0,
+            cantitate=100.0,
+            la_data=date(2026, 4, 1),
+            pentru="WO",
+            pe_comanda=9002,
+            tiraj_comandat=1000,
+            tiraj_realizat=0,
+            rezervat_in="* MTRL TO WO *",
+            tip_rezervare="B",
+        ))
+        db.commit()
+
+        run_planning(db)
+
+        result = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 9002).first()
+        assert result is not None
+        assert result.status == "blocat_prefabricat", (
+            f"Expected blocat_prefabricat, got '{result.status}'. "
+            f"Motiv: {result.motiv}"
+        )
+        assert result.motiv is not None
+        assert "9001" in result.motiv, (
+            f"Producer WO 9001 not found in motiv: '{result.motiv}'"
+        )
+        assert "ART-PREF" in result.motiv, (
+            f"Article ART-PREF not found in motiv: '{result.motiv}'"
+        )
+
+    def test_missing_external_material_gives_no_material(self, db):
+        """
+        Article ART-EXT is NOT produced by any internal WO (only B-type entries).
+        WO 9003 needs ART-EXT but stock=0 and no supply arrives.
+        Expected: WO 9003 → no_material (not blocat_prefabricat).
+        """
+        self._setup_base(db)
+
+        c = make_comanda(9003)
+        db.add(c)
+        db.flush()
+        db.add(make_dispatch(9003, 10, "CL1", p_setup=0.0, p_runtime=2.0))
+
+        # Only B-type, no A-type from internal WO
+        db.add(Deficit(
+            articol="ART-EXT",
+            sold_actual=0.0,
+            cantitate=100.0,
+            la_data=date(2026, 4, 1),
+            pentru="WO",
+            pe_comanda=9003,
+            tiraj_comandat=1000,
+            tiraj_realizat=0,
+            rezervat_in="* MTRL TO WO *",
+            tip_rezervare="B",
+        ))
+        db.commit()
+
+        run_planning(db)
+
+        result = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 9003).first()
+        assert result is not None
+        assert result.status == "no_material", (
+            f"Expected no_material, got '{result.status}'. "
+            f"Motiv: {result.motiv}"
+        )
+
+    def test_prefabricat_supplier_entry_does_not_trigger(self, db):
+        """
+        Article ART-SUPPL has an A-type entry but with rezervat_in='FURNIZOR' (supplier).
+        WO 9004 needs ART-SUPPL but stock=0.
+        Expected: WO 9004 → no_material (rezervat_in doesn't match COMAND%LUCRU pattern).
+        """
+        self._setup_base(db)
+
+        c = make_comanda(9004)
+        db.add(c)
+        db.flush()
+        db.add(make_dispatch(9004, 10, "CL1", p_setup=0.0, p_runtime=2.0))
+
+        # A-type but from a supplier, not an internal WO
+        db.add(Deficit(
+            articol="ART-SUPPL",
+            sold_actual=0.0,
+            cantitate=500.0,
+            la_data=None,
+            pentru="furnizor",
+            pe_comanda=9004,
+            tiraj_comandat=500,
+            tiraj_realizat=0,
+            rezervat_in="FURNIZOR EXTERN",
+            tip_rezervare="A",
+        ))
+        # B-type: WO 9004 needs ART-SUPPL
+        db.add(Deficit(
+            articol="ART-SUPPL",
+            sold_actual=0.0,
+            cantitate=100.0,
+            la_data=date(2026, 4, 1),
+            pentru="WO",
+            pe_comanda=9004,
+            tiraj_comandat=1000,
+            tiraj_realizat=0,
+            rezervat_in="* MTRL TO WO *",
+            tip_rezervare="B",
+        ))
+        db.commit()
+
+        run_planning(db)
+
+        result = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 9004).first()
+        assert result is not None
+        assert result.status == "no_material", (
+            f"Expected no_material for supplier article, got '{result.status}'. "
+            f"Motiv: {result.motiv}"
+        )
