@@ -136,14 +136,37 @@ export default function ComenziList() {
     },
   ];
 
+  // Split cards: status (exclusive) vs subsets (transversal)
+  const statusCards  = overviewCards.slice(0, 4); // Total, 06, LIBER, STOP
+  const subsetCards  = overviewCards.slice(4);    // Întârziate
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {overviewCards.map(card => (
+      {/* ── Status breakdown (exclusive: LIBER + STOP = Total) ── */}
+      <div className="flex flex-wrap gap-3 items-start">
+        {statusCards.map(card => (
           <button
             key={card.label}
             onClick={card.onClick}
-            className={`flex flex-col items-start px-4 py-3 rounded-xl border transition-all text-left
+            className={`flex flex-col items-start px-4 py-3 rounded-xl border transition-all text-left min-w-[110px]
+              ${card.color}
+              ${card.active ? 'ring-2 ring-offset-1 ring-current shadow-sm' : 'hover:shadow-sm hover:brightness-95'}`}
+          >
+            <span className="text-2xl font-bold leading-tight">{card.value}</span>
+            <span className="text-xs font-medium mt-0.5 opacity-80">{card.label}</span>
+          </button>
+        ))}
+
+        {/* Divider + subset cards */}
+        <div className="h-12 w-px bg-slate-200 self-center mx-1" />
+        <div className="flex flex-col justify-center mr-1">
+          <span className="text-[10px] text-slate-400 uppercase tracking-wide leading-none mb-1">Subseturi</span>
+        </div>
+        {subsetCards.map(card => (
+          <button
+            key={card.label}
+            onClick={card.onClick}
+            className={`flex flex-col items-start px-4 py-3 rounded-xl border transition-all text-left min-w-[110px]
               ${card.color}
               ${card.active ? 'ring-2 ring-offset-1 ring-current shadow-sm' : 'hover:shadow-sm hover:brightness-95'}`}
           >
