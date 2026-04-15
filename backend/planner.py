@@ -230,12 +230,22 @@ def run_planning(db: Session) -> dict:
     # next_free_time[resursa_id] = datetime when resource next becomes free
     next_free_time: dict[int, datetime] = {}
 
-    # Pre-populate next_free_time from frozen operations
+    # wo_last_end[wo] = latest data_end among all planned ops for this WO.
+    # Ensures that operations within the same WO are always sequential —
+    # a product can only be in ONE place at a time, even if two ops share
+    # the same rank and end up on different resources within the same CL.
+    wo_last_end: dict[int, datetime] = {}
+
+    # Pre-populate next_free_time and wo_last_end from frozen operations
     for fr in frozen_ops.values():
         if fr.resursa_id and fr.data_end:
             existing = next_free_time.get(fr.resursa_id)
             if existing is None or fr.data_end > existing:
                 next_free_time[fr.resursa_id] = fr.data_end
+        if fr.data_end:
+            wo_existing = wo_last_end.get(fr.wo)
+            if wo_existing is None or fr.data_end > wo_existing:
+                wo_last_end[fr.wo] = fr.data_end
 
     # ── Step 4: Build material stock tracker ─────────────────────────────────
     # stoc_tracker[articol] = available quantity (updated as WOs are reserved)
@@ -507,6 +517,12 @@ def run_planning(db: Session) -> dict:
                 if not resursa_operatii.get(r.id) or op_code in resursa_operatii[r.id]
             ]
 
+            # A product can only be in ONE place at a time: enforce that this
+            # operation starts after ALL previously placed operations for the
+            # same WO finish, regardless of resource or CL.
+            if disp.wo in wo_last_end:
+                earliest_start = max(earliest_start, wo_last_end[disp.wo])
+
             # Pick first valid resource with an available slot starting from earliest_start.
             # find_slot_precise updates next_free_time in-place on success.
             allocated = False
@@ -536,6 +552,10 @@ def run_planning(db: Session) -> dict:
                 ))
                 stats[final_status] += 1
                 update_rank(rank, final_status, slot_end)
+                # Update WO-level last end time to prevent parallel ops within same WO
+                wo_existing = wo_last_end.get(disp.wo)
+                if wo_existing is None or slot_end > wo_existing:
+                    wo_last_end[disp.wo] = slot_end
                 allocated = True
                 break
 

@@ -1059,3 +1059,58 @@ class TestPrefabricatDetection:
             f"Expected no_material for supplier article, got '{result.status}'. "
             f"Motiv: {result.motiv}"
         )
+
+
+class TestNoParallelOpsWithinWO:
+    """
+    A product can only be in ONE place at a time.
+    Two operations from the same WO with the same rank on different
+    resources within the same CL must NOT overlap in time.
+    """
+
+    def test_same_rank_different_resources_are_sequential(self, db):
+        """
+        WO 5001 has OP:10 and OP:20 both with rank=1 on CL=CL1.
+        CL1 has two resources (Masina1, Masina2).
+        Expected: they are placed sequentially (Masina2 starts after Masina1 ends),
+        NOT in parallel (same start time on different machines).
+        """
+        # Two resources in same CL
+        r1 = make_resursa("CL1", "Masina1")
+        r2 = make_resursa("CL1", "Masina2")
+        db.add_all([r1, r2])
+        db.flush()
+
+        today = date.today()
+        for i in range(5):
+            db.add(make_program(r1, today + timedelta(days=i), 8.0))
+            db.add(make_program(r2, today + timedelta(days=i), 8.0))
+
+        # Both ops have same rank
+        db.add(Operatie(cod="10", descriere="Op 10", cod_unic="U10", sectie="S1", rank=1))
+        db.add(Operatie(cod="20", descriere="Op 20", cod_unic="U20", sectie="S1", rank=1))
+
+        c = make_comanda(5001)
+        db.add(c)
+        db.flush()
+
+        db.add(make_dispatch(5001, 10, "CL1", p_setup=0.0, p_runtime=4.0))
+        db.add(make_dispatch(5001, 20, "CL1", p_setup=0.0, p_runtime=4.0))
+        db.commit()
+
+        run_planning(db)
+
+        results = db.query(PlanificareRezultat).filter(
+            PlanificareRezultat.wo == 5001
+        ).order_by(PlanificareRezultat.data_start).all()
+
+        assert len(results) == 2
+        assert all(r.status in ("planned",) for r in results), \
+            f"Expected both planned, got {[r.status for r in results]}"
+
+        # KEY assertion: second op must start AFTER first op ends (no overlap)
+        r_a, r_b = results[0], results[1]
+        assert r_b.data_start >= r_a.data_end, (
+            f"Operations overlap! OP_A ends {r_a.data_end}, OP_B starts {r_b.data_start}. "
+            f"Resources: {r_a.resursa_id} vs {r_b.resursa_id}"
+        )
