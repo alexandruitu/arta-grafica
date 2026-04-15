@@ -79,6 +79,7 @@ def find_slot_precise(
     next_free_time: dict,
     hours_needed: float,
     earliest_start: datetime,
+    dry_run: bool = False,
 ) -> tuple[datetime | None, datetime | None]:
     """
     Find when a resource can fit hours_needed, respecting shift bounds (6-22).
@@ -146,7 +147,8 @@ def find_slot_precise(
             )
 
     if hours_remaining <= 0.0 and slot_start is not None and slot_end is not None:
-        next_free_time[resursa_id] = slot_end
+        if not dry_run:
+            next_free_time[resursa_id] = slot_end
         return slot_start, slot_end
     return None, None
 
@@ -523,15 +525,31 @@ def run_planning(db: Session) -> dict:
             if disp.wo in wo_last_end:
                 earliest_start = max(earliest_start, wo_last_end[disp.wo])
 
-            # Pick first valid resource with an available slot starting from earliest_start.
-            # find_slot_precise updates next_free_time in-place on success.
-            allocated = False
+            # Load balancing — "earliest slot first":
+            # Try ALL valid resources in dry_run mode (no side effects),
+            # pick the one offering the earliest slot_start, then commit only
+            # that allocation. A busy machine has a later next_free_time, so a
+            # free machine naturally wins → work spreads across all resources.
+            best_start: datetime | None = None
+            best_end: datetime | None = None
+            best_r = None
             for r in valid_resurse:
-                slot_start, slot_end = find_slot_precise(
-                    r.id, disponibilitate, next_free_time, remaining, earliest_start
+                s_start, s_end = find_slot_precise(
+                    r.id, disponibilitate, next_free_time, remaining, earliest_start,
+                    dry_run=True,
                 )
-                if slot_start is None:
-                    continue  # no room on this resource, try next
+                if s_start is None:
+                    continue
+                if best_start is None or s_start < best_start:
+                    best_start = s_start
+                    best_end = s_end
+                    best_r = r
+
+            allocated = False
+            if best_r is not None:
+                slot_start, slot_end = best_start, best_end
+                # Commit: update next_free_time for the chosen resource
+                next_free_time[best_r.id] = slot_end
 
                 if wo_previzionat_start is None:
                     final_status = "planned"
@@ -545,7 +563,7 @@ def run_planning(db: Session) -> dict:
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id, dispatch_id=disp.id,
                     wo=disp.wo, op=disp.op, cl=disp.cl,
-                    resursa_id=r.id, resursa_nume=r.resursa,
+                    resursa_id=best_r.id, resursa_nume=best_r.resursa,
                     data_start=slot_start, data_end=slot_end,
                     durata_ore=remaining,
                     status=final_status, motiv=None,
@@ -557,7 +575,6 @@ def run_planning(db: Session) -> dict:
                 if wo_existing is None or slot_end > wo_existing:
                     wo_last_end[disp.wo] = slot_end
                 allocated = True
-                break
 
             if not allocated:
                 db.add(PlanificareRezultat(

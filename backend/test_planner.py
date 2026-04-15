@@ -1114,3 +1114,53 @@ class TestNoParallelOpsWithinWO:
             f"Operations overlap! OP_A ends {r_a.data_end}, OP_B starts {r_b.data_start}. "
             f"Resources: {r_a.resursa_id} vs {r_b.resursa_id}"
         )
+
+
+class TestLoadBalancing:
+    """
+    When a CL has multiple resources, operations from DIFFERENT WOs
+    should be distributed across machines (earliest-slot-first), not
+    all stacked on the first machine.
+    """
+
+    def test_two_wos_spread_across_two_resources(self, db):
+        """
+        CL1 has Masina1 and Masina2, both free from today.
+        WO 6001 and WO 6002 each have one operation.
+        Expected: they land on DIFFERENT resources (one each),
+        not both on Masina1.
+        """
+        r1 = make_resursa("CL1", "Masina1")
+        r2 = make_resursa("CL1", "Masina2")
+        db.add_all([r1, r2])
+        db.flush()
+
+        today = date.today()
+        for i in range(5):
+            db.add(make_program(r1, today + timedelta(days=i), 8.0))
+            db.add(make_program(r2, today + timedelta(days=i), 8.0))
+
+        db.add(make_operatie(10, rank=1))
+
+        c1 = make_comanda(6001)
+        c2 = make_comanda(6002)
+        db.add_all([c1, c2])
+        db.flush()
+
+        db.add(make_dispatch(6001, 10, "CL1", p_setup=0.0, p_runtime=4.0))
+        db.add(make_dispatch(6002, 10, "CL1", p_setup=0.0, p_runtime=4.0))
+        db.commit()
+
+        run_planning(db)
+
+        res6001 = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 6001).first()
+        res6002 = db.query(PlanificareRezultat).filter(PlanificareRezultat.wo == 6002).first()
+
+        assert res6001 is not None and res6001.status == "planned"
+        assert res6002 is not None and res6002.status == "planned"
+
+        # KEY: the two WOs should land on different resources
+        assert res6001.resursa_id != res6002.resursa_id, (
+            f"Both WOs landed on resursa_id={res6001.resursa_id}. "
+            f"Load balancing is broken — all work stacks on one machine."
+        )
