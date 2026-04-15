@@ -108,7 +108,7 @@ export default function GanttView() {
     const ganttTasks = tasks.map(t => ({
       id: t.id, name: t.name, start: t.start,
       end: t.end || t.start, progress: t.progress,
-      dependencies: t.dependencies || '',
+      dependencies: '',
       custom_class: t.custom_class,
     }));
 
