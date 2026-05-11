@@ -71,7 +71,12 @@ export const auth = {
 export const api = {
   // Import & Plan
   importData: (formData: FormData) => uploadForm('/import', formData),
-  runPlanning: () => request('/plan', { method: 'POST' }),
+  runPlanning: (opts?: { ignore_material?: boolean; ignore_rank?: boolean }) =>
+    request('/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts ?? {}),
+    }),
 
   // Stats
   getStats: () => request<any>('/stats'),

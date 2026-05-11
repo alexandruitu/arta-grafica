@@ -153,8 +153,16 @@ def find_slot_precise(
     return None, None
 
 
-def run_planning(db: Session) -> dict:
-    """Execute the planning algorithm."""
+def run_planning(
+    db: Session,
+    ignore_material: bool = False,
+    ignore_rank: bool = False,
+) -> dict:
+    """Execute the planning algorithm.
+
+    ignore_material: skip material availability checks (plan even if stock is insufficient)
+    ignore_rank:     skip rank dependency checks (plan operations out of rank order)
+    """
     sesiune = PlanificareSesiune(
         created_at=datetime.now(),
         status="running",
@@ -267,13 +275,27 @@ def run_planning(db: Session) -> dict:
 
     # ── Step 4b: Build A-type arrival timeline per article ────────────────────
     # artikel_arrivals[articol] = sorted [(date, qty)] from aprovizionare records
+    # Also add undated external aprovizionari (no la_data, not from internal WO)
+    # directly to stoc_tracker — these are confirmed purchase orders without ETA.
     artikel_arrivals: dict[str, list] = defaultdict(list)
     for d in db.query(Deficit).filter(
         Deficit.tip_rezervare == "A",
-        Deficit.la_data.isnot(None),
+        Deficit.cantitate > 0,
     ).all():
-        if d.articol and d.cantitate and d.cantitate > 0:
+        if not d.articol:
+            continue
+        # Skip internal WO-production records (prefabricate) — handled separately
+        is_prefabricat = d.rezervat_in and (
+            "COMAND" in d.rezervat_in.upper() and "LUCRU" in d.rezervat_in.upper()
+        )
+        if is_prefabricat:
+            continue
+        if d.la_data is not None:
             artikel_arrivals[d.articol].append((d.la_data, d.cantitate))
+        else:
+            # No arrival date → treat as available in current stock
+            # (confirmed purchase order without ETA — e.g., +272.000 supply orders)
+            stoc_tracker[d.articol] = stoc_tracker.get(d.articol, 0.0) + d.cantitate
     for art in artikel_arrivals:
         artikel_arrivals[art].sort(key=lambda x: x[0])
 
@@ -355,7 +377,7 @@ def run_planning(db: Session) -> dict:
             else:
                 wo_block = ("no_bt", "Comanda nu are Bun de Tipar valid si nu are data limita BT")
 
-        if wo_block is None and material_lipsit:
+        if wo_block is None and material_lipsit and not ignore_material:
             art, available, cantitate_needed = material_lipsit
             deficit_qty = cantitate_needed - available
             mat_date = None
@@ -496,7 +518,7 @@ def run_planning(db: Session) -> dict:
                         rank_end_date[prev_rank],
                     )
 
-            if blocked:
+            if blocked and not ignore_rank:
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id, dispatch_id=disp.id,
                     wo=disp.wo, op=disp.op, cl=disp.cl,

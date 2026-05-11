@@ -55,7 +55,7 @@ export default function GanttView() {
   const [selectedCL,  setSelectedCL]  = useState('');
   const [search,      setSearch]      = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [viewMode,    setViewMode]    = useState('Half Day');
+  const [viewMode,    setViewMode]    = useState('Day');
   const [loading,     setLoading]     = useState(false);
 
   // Sidebar – selected operation
@@ -119,7 +119,7 @@ export default function GanttView() {
         bar_height: 24,
         bar_corner_radius: 3,
         padding: 14,
-        on_click: (task: any) => {
+        on_click: async (task: any) => {
           const t = tasks.find(x => x.id === task.id);
           if (!t) return;
           const isFrozen = t.custom_class.startsWith('bar-frozen');
@@ -132,6 +132,14 @@ export default function GanttView() {
             frozen: isFrozen,
           });
           setEditStart(t.start);
+          // Fetch resultId for freeze/unfreeze actions
+          try {
+            const ops = await api.getPlanningOperatii({ wo: String(t.wo) });
+            const match = ops.find((o: any) => o.wo === t.wo && o.op === t.op);
+            if (match) {
+              setSelected(prev => prev ? { ...prev, resultId: match.id } : prev);
+            }
+          } catch { /* silent */ }
         },
       });
 
@@ -378,6 +386,22 @@ export default function GanttView() {
                 </span>
               </div>
             </div>
+
+            {/* Unfreeze button — only when frozen */}
+            {selected.frozen && selected.resultId && (
+              <button
+                onClick={async () => {
+                  try {
+                    await api.toggleFrozen(selected.resultId!, false);
+                    await loadGantt();
+                    setSelected(null);
+                  } catch (e: any) { alert('Eroare: ' + e.message); }
+                }}
+                className="w-full py-1.5 bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-medium hover:bg-slate-200 flex items-center justify-center gap-1"
+              >
+                <Unlock size={12} /> Elimină Freeze
+              </button>
+            )}
 
             {/* Manual start */}
             <div className="space-y-2">

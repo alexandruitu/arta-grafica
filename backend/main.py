@@ -107,14 +107,17 @@ async def do_import(
 
 # --- Planning ---
 @app.post("/api/plan", response_model=PlanningResult)
-def do_plan(db: Session = Depends(get_db)):
+def do_plan(body: dict = {}, db: Session = Depends(get_db)):
+    """Run planning. Optional body: {ignore_material: bool, ignore_rank: bool}"""
     if not _PLAN_LOCK.acquire(blocking=False):
         raise HTTPException(
             status_code=409,
             detail="O planificare este deja in curs. Asteptati finalizarea ei.",
         )
+    ignore_material = bool(body.get("ignore_material", False))
+    ignore_rank     = bool(body.get("ignore_rank", False))
     try:
-        result = run_planning(db)
+        result = run_planning(db, ignore_material=ignore_material, ignore_rank=ignore_rank)
     finally:
         _PLAN_LOCK.release()
     return PlanningResult(**result)
@@ -776,24 +779,28 @@ def get_planning_by_comanda(db: Session = Depends(get_db)):
 
 @app.patch("/api/planificare/operatii/{result_id}/start")
 def set_start(result_id: int, body: dict, db: Session = Depends(get_db)):
-    """Set manual start time and auto-freeze the operation. Keeps duration unchanged."""
+    """Set manual start time and auto-freeze the operation. Keeps duration unchanged.
+    Works on any operation — blocked ones are promoted to 'planned' and frozen."""
     from datetime import timedelta as _td
     r = db.query(PlanificareRezultat).filter(PlanificareRezultat.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
-    if r.status not in PLACED_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Doar operatiile planificate pot fi modificate (status: {r.status})")
     data_start_str = body.get("data_start", "")
     try:
         new_start = datetime.strptime(data_start_str, "%Y-%m-%d %H:%M")
     except ValueError:
         raise HTTPException(status_code=400, detail="Format invalid. Foloseste: YYYY-MM-DD HH:MM")
     r.data_start = new_start
-    r.data_end = new_start + _td(hours=float(r.durata_ore))
+    durata = float(r.durata_ore) if r.durata_ore and r.durata_ore > 0 else 1.0
+    r.data_end = new_start + _td(hours=durata)
     r.frozen = True
+    # If the operation was blocked, promote it to planned so it shows on Gantt
+    if r.status not in PLACED_STATUSES:
+        r.status = "planned"
+        r.motiv = f"Planificat manual (anterior: {r.status})"
     db.commit()
     return {
-        "id": r.id, "frozen": r.frozen,
+        "id": r.id, "frozen": r.frozen, "status": r.status,
         "data_start": r.data_start.strftime("%Y-%m-%d %H:%M"),
         "data_end": r.data_end.strftime("%Y-%m-%d %H:%M"),
     }
@@ -1217,6 +1224,37 @@ def _build_ai_context(question_id: str, db: Session) -> tuple[str, str]:
             + ("\n".join([x[1] for x in rank_lines[:12]]) or "Nicio operatie") + "\n\n"
             f"MATERIALE CU DEFICIT MIC (<100 unitati) — comanda rapida poate debloca:\n"
             + ("\n".join(small_def[:10]) or "Niciun material cu deficit mic")
+        )
+        return question, context
+
+    # ── PLANIFICARE: Explică algoritmul ───────────────────────────────────────
+    elif question_id == "plan_algoritm":
+        question = "Explică în pași clari cum funcționează algoritmul de planificare."
+        context = (
+            f"DATA: {today}\n"
+            f"PLANIFICARE: {ses_label}\n"
+            f"REZULTATE: {plan_line}\n\n"
+            f"ALGORITMUL DE PLANIFICARE — PAȘI:\n"
+            f"1. SORTARE COMENZI: prioritate descrescătoare după StadiuPrepress "
+            f"(06-În producție=100, 05-BT existent=50, 04-Trimis BT=40, 03-Fisiere=30, "
+            f"02-Job creat=20, 01-Fără Fișiere=10), apoi dată livrare crescătoare, "
+            f"apoi comenzile cu material înaintea celor fără.\n"
+            f"2. EXCLUDERE: comenzile cu Status_cda=STOP sunt sărite complet.\n"
+            f"3. VERIFICARE BT: operația necesită BT valid (bt1/bt2/bt3/bt4 nevid și ≠ 1911-11-11). "
+            f"Fără BT → 'Fară BT'. Dacă există data_limita_bt → 'Previzionat (fără BT)' cu start la acea dată.\n"
+            f"4. VERIFICARE RANK: operațiile unui WO au un număr de ordine (rank). "
+            f"O operație cu rank N nu poate fi planificată dacă există o operație cu rank < N "
+            f"care este încă 'open' (neînchisă și neplanificată). "
+            f"Dacă predecesoarea este planificată, operația curentă începe după end-ul ei.\n"
+            f"5. VERIFICARE MATERIAL: SoldActual + Aprovizionări_externe_fără_dată - Rezervări > 0. "
+            f"Dacă lipsește materialul dar există o comandă de aprovizionare cu dată → 'Previzionat (fără material)', "
+            f"start la data aprovizionării. Dacă materialul e produs intern de alt WO → 'Blocat Prefabricat'.\n"
+            f"6. ALOCARE RESURSĂ: se caută toate resursele din CL (centru de lucru) compatibile cu operația. "
+            f"Se selectează resursa cu cel mai devreme slot disponibil (load balancing). "
+            f"Operațiile aceluiași WO sunt mereu secvențiale (nu paralele).\n"
+            f"7. CALCUL TIMP: ore_necesare = max(0, P_Setup + P_Runtime - R_Runtime).\n"
+            f"8. STATUT FINAL: planned / previzionat_bt / previzionat_material / "
+            f"no_material / blocat_prefabricat / blocked_by_rank / no_bt / no_resource.\n"
         )
         return question, context
 

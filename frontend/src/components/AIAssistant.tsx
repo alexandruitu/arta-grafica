@@ -12,6 +12,7 @@ const QUESTIONS: Record<string, { id: string; label: string }[]> = {
     { id: 'plan_blocate',       label: 'De ce sunt comenzi blocate?' },
     { id: 'plan_aprovizionare', label: 'Ce materiale să aprovizionez?' },
     { id: 'plan_quickwins',     label: 'Care sunt quick wins?' },
+    { id: 'plan_algoritm',      label: 'Explică algoritmul de planificare' },
   ],
 };
 

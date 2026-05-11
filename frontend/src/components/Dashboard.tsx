@@ -38,6 +38,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
+  const [ignoreMaterial, setIgnoreMaterial] = useState(false);
+  const [ignoreRank,     setIgnoreRank]     = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,7 +92,7 @@ export default function Dashboard() {
   const handlePlan = async () => {
     setPlanLoading(true);
     try {
-      await api.runPlanning();
+      await api.runPlanning({ ignore_material: ignoreMaterial, ignore_rank: ignoreRank });
       await loadData();
     } catch (e: any) {
       alert('Planning error: ' + e.message);
@@ -123,13 +125,26 @@ export default function Dashboard() {
             <Upload size={16} />
             {importLoading ? 'Se importa...' : 'Import Date Excel'}
           </button>
-          <button
-            onClick={handlePlan}
-            disabled={planLoading || !stats?.total_comenzi}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
-          >
-            {planLoading ? 'Se planifica...' : 'Ruleaza Planificarea'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handlePlan}
+              disabled={planLoading || !stats?.total_comenzi}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+            >
+              {planLoading ? 'Se planifică...' : 'Rulează Planificarea'}
+            </button>
+            {/* Constraint toggles */}
+            <label className={`flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1.5 rounded-lg border transition-colors
+              ${ignoreMaterial ? 'bg-orange-50 border-orange-300 text-orange-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+              <input type="checkbox" checked={ignoreMaterial} onChange={e => setIgnoreMaterial(e.target.checked)} className="rounded" />
+              Ignoră material
+            </label>
+            <label className={`flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1.5 rounded-lg border transition-colors
+              ${ignoreRank ? 'bg-orange-50 border-orange-300 text-orange-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+              <input type="checkbox" checked={ignoreRank} onChange={e => setIgnoreRank(e.target.checked)} className="rounded" />
+              Ignoră rank
+            </label>
+          </div>
         </div>
 
         {/* File picker panel */}
