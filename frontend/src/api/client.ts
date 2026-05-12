@@ -74,7 +74,9 @@ export const api = {
   runPlanning: (opts?: { ignore_material?: boolean; ignore_rank?: boolean }) =>
     request('/plan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Don't override headers — request() already sets Content-Type + Authorization.
+      // Passing a headers key in options would overwrite the default object (including
+      // the Authorization token), causing a 401 "Sesiune expirată" error.
       body: JSON.stringify(opts ?? {}),
     }),
 

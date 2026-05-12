@@ -105,12 +105,23 @@ export default function GanttView() {
     if (!containerRef.current || !wrapperRef.current || tasks.length === 0) return;
     containerRef.current.innerHTML = '';
 
-    const ganttTasks = tasks.map(t => ({
-      id: t.id, name: t.name, start: t.start,
-      end: t.end || t.start, progress: t.progress,
-      dependencies: t.dependencies || '',
-      custom_class: t.custom_class,
-    }));
+    // Minimum visual duration: 2 hours so short ops have a visible bar.
+    // This is purely cosmetic — the sidebar/tooltip still shows real times.
+    const MIN_VISUAL_HOURS = 2;
+    const ganttTasks = tasks.map(t => {
+      const startMs = new Date(t.start.replace(' ', 'T')).getTime();
+      const endMs   = new Date((t.end || t.start).replace(' ', 'T')).getTime();
+      const minEndMs = startMs + MIN_VISUAL_HOURS * 3600 * 1000;
+      const visualEnd = endMs < minEndMs ? new Date(minEndMs) : new Date(endMs);
+      const fmt = (d: Date) =>
+        d.toISOString().slice(0, 16).replace('T', ' ');
+      return {
+        id: t.id, name: t.name, start: t.start,
+        end: fmt(visualEnd), progress: t.progress,
+        dependencies: t.dependencies || '',
+        custom_class: t.custom_class,
+      };
+    });
 
     try {
       ganttRef.current = new Gantt(containerRef.current, ganttTasks, {
