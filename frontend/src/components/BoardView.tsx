@@ -265,7 +265,7 @@ export default function BoardView() {
         <select value={selectedCL} onChange={e => setSelectedCL(e.target.value)}
           className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
           <option value="">Toate CL</option>
-          {centreLucru.map(cl => (
+          {centreLucru.filter(cl => cl.cl).map(cl => (
             <option key={cl.cl} value={cl.cl}>{cl.cl} – {cl.denumire}</option>
           ))}
         </select>

@@ -25,6 +25,7 @@ from models import (
 )
 
 # StadiuPrepress priority (higher number = higher priority in planning)
+# "00 - N/A" = treated same as "In productie": already in production, no BT needed.
 STADIU_PRIORITY = {
     "06 - In productie": 100,
     "05 - BT existent": 50,
@@ -32,7 +33,7 @@ STADIU_PRIORITY = {
     "03 - Fisiere existente": 30,
     "02 - Job creat": 20,
     "01 - Fara Fisiere": 10,
-    "00 - N/A": 0,
+    "00 - N/A": 100,  # Treated as "in production" — top priority, no BT required
 }
 
 INVALID_BT_DATE = "1911-11-11"
@@ -207,8 +208,12 @@ def run_planning(
             _wo_mat_snap[str(d.pe_comanda)].append((d.articol, cantitate))
 
     def wo_has_material(cp: int) -> bool:
-        """True if current stock covers ALL reservations for this WO."""
+        """True if current stock covers ALL non-trivial reservations for this WO."""
         for art, needed in _wo_mat_snap.get(str(cp), []):
+            if needed <= 0.01:
+                continue  # negligible consumption — ignore
+            if art and art.startswith("MS"):
+                continue  # MS-prefixed materials are excluded from planning checks
             if _stoc_snap.get(art, 0.0) < needed:
                 return False
         return True
@@ -334,8 +339,20 @@ def run_planning(
         "no_bt": 0,
         "completed": 0,
     }
-    today = date.today()
-    today_dt = datetime(today.year, today.month, today.day, SHIFT_START_H)
+    # Use current datetime as planning start — operations won't be scheduled in the past.
+    # Clamp to shift hours: before shift → use shift start; after shift → next day shift start.
+    now = datetime.now()
+    today = now.date()
+    shift_start_today = datetime(today.year, today.month, today.day, SHIFT_START_H)
+    shift_end_today   = datetime(today.year, today.month, today.day, SHIFT_END_H)
+    if now < shift_start_today:
+        today_dt = shift_start_today
+    elif now >= shift_end_today:
+        next_day = today + timedelta(days=1)
+        today_dt = datetime(next_day.year, next_day.month, next_day.day, SHIFT_START_H)
+    else:
+        # Truncate to minutes for clean slot start
+        today_dt = now.replace(second=0, microsecond=0)
 
     for comanda in comenzi:
         dispatch_items = (
@@ -359,6 +376,10 @@ def run_planning(
         materiale = wo_materiale.get(wo_str, [])
         material_lipsit = None
         for art, cantitate in materiale:
+            if cantitate <= 0.01:
+                continue  # negligible consumption — skip material check
+            if art and art.startswith("MS"):
+                continue  # MS-prefixed materials excluded from planning checks
             available = stoc_tracker.get(art, 0.0)
             if available < cantitate:
                 material_lipsit = (art, available, cantitate)
@@ -370,7 +391,11 @@ def run_planning(
         # Tracks WHY this WO is previzionat — used for status sub-type
         wo_previzionat_reason: str = ""   # "bt" | "material" | "bt+material"
 
-        if not has_valid_bt(comanda):
+        stadiu_priority_val = get_stadiu_priority(comanda.stadiu_prepress)
+
+        # BT check: skip for high-stadiu orders (≥ 50) — BT already exists or not needed.
+        # "05 - BT existent" (50), "06 - In productie" (100), "00 - N/A" (100) are all exempt.
+        if stadiu_priority_val < 50 and not has_valid_bt(comanda):
             if comanda.data_limita_bt:
                 wo_previzionat_start = comanda.data_limita_bt
                 wo_previzionat_reason = "bt"

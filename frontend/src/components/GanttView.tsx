@@ -105,9 +105,9 @@ export default function GanttView() {
     if (!containerRef.current || !wrapperRef.current || tasks.length === 0) return;
     containerRef.current.innerHTML = '';
 
-    // Minimum visual duration: 2 hours so short ops have a visible bar.
+    // Minimum visual duration: 4 hours so short ops have a clearly visible bar.
     // This is purely cosmetic — the sidebar/tooltip still shows real times.
-    const MIN_VISUAL_HOURS = 2;
+    const MIN_VISUAL_HOURS = 4;
     const ganttTasks = tasks.map(t => {
       const startMs = new Date(t.start.replace(' ', 'T')).getTime();
       const endMs   = new Date((t.end || t.start).replace(' ', 'T')).getTime();
@@ -226,7 +226,7 @@ export default function GanttView() {
           className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm"
         >
           <option value="">Toate centrele de lucru</option>
-          {centreLucru.map(cl => (
+          {centreLucru.filter(cl => cl.cl).map(cl => (
             <option key={cl.cl} value={cl.cl}>{cl.cl} – {cl.denumire}</option>
           ))}
         </select>

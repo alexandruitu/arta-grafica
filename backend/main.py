@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import hashlib as _hashlib
 import threading as _threading
-from fastapi import FastAPI, Depends, Query, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, Depends, Query, HTTPException, Request, UploadFile, File, Body
+from pydantic import BaseModel as _BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -37,6 +38,12 @@ _VALID_TOKEN: str = _hashlib.sha256(
 ).hexdigest()
 
 _PLAN_LOCK = _threading.Lock()
+
+
+class PlanOptions(_BaseModel):
+    """Options for the planning algorithm."""
+    ignore_material: bool = False
+    ignore_rank: bool = False
 
 # Status constants — must match planner.py output
 PREVIZIONAT_STATUSES = {"previzionat", "previzionat_bt", "previzionat_material"}
@@ -107,17 +114,22 @@ async def do_import(
 
 # --- Planning ---
 @app.post("/api/plan", response_model=PlanningResult)
-def do_plan(body: dict = {}, db: Session = Depends(get_db)):
-    """Run planning. Optional body: {ignore_material: bool, ignore_rank: bool}"""
+def do_plan(
+    db: Session = Depends(get_db),
+    body: PlanOptions = Body(default=PlanOptions()),
+):
+    """Run planning. Optional JSON body: {ignore_material: bool, ignore_rank: bool}"""
     if not _PLAN_LOCK.acquire(blocking=False):
         raise HTTPException(
             status_code=409,
             detail="O planificare este deja in curs. Asteptati finalizarea ei.",
         )
-    ignore_material = bool(body.get("ignore_material", False))
-    ignore_rank     = bool(body.get("ignore_rank", False))
     try:
-        result = run_planning(db, ignore_material=ignore_material, ignore_rank=ignore_rank)
+        result = run_planning(
+            db,
+            ignore_material=body.ignore_material,
+            ignore_rank=body.ignore_rank,
+        )
     finally:
         _PLAN_LOCK.release()
     return PlanningResult(**result)
@@ -401,6 +413,10 @@ def get_gantt_data(
     for r in results:
         if not r.data_start or not r.data_end:
             continue
+        # Ensure end > start (guard against 0-duration ops causing invisible bars)
+        gantt_end = r.data_end
+        if gantt_end <= r.data_start:
+            gantt_end = r.data_start + timedelta(hours=max(float(r.durata_ore or 1), 0.5))
 
         comanda = comanda_map.get(r.wo)
         delivery = (comanda.data_actualizata_livrare or comanda.dt_livr_prod) if comanda else None
@@ -449,7 +465,7 @@ def get_gantt_data(
             id=f"{r.wo}-{r.op}",
             name=f"WO:{r.wo} OP:{r.op} ({r.cl})",
             start=r.data_start.strftime("%Y-%m-%d %H:%M"),
-            end=r.data_end.strftime("%Y-%m-%d %H:%M"),
+            end=gantt_end.strftime("%Y-%m-%d %H:%M"),
             progress=0,
             dependencies=",".join(deps),
             custom_class=custom_class,
