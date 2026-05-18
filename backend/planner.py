@@ -330,10 +330,11 @@ def run_planning(
     # ── Step 6: Plan operations ───────────────────────────────────────────────
     stats = {
         "planned": 0,
-        "previzionat_bt": 0,          # previzionat: fara BT dar cu data_limita_bt
-        "previzionat_material": 0,    # previzionat: fara material dar cu aprovizionare
+        "previzionat_bt": 0,            # previzionat: fara BT dar cu data_limita_bt
+        "previzionat_material": 0,      # previzionat: fara material dar cu aprovizionare
+        "previzionat_semifabricat": 0,  # previzionat: material e produs de un WO intern planificat
         "no_material": 0,
-        "blocat_prefabricat": 0,      # material lipsa dar produs de un WO intern
+        "blocat_semifabricat": 0,       # material lipsa, produs de un WO intern NEPLANIFICAT
         "no_resource": 0,
         "blocked_by_rank": 0,
         "no_bt": 0,
@@ -417,10 +418,24 @@ def run_planning(
                 producer_wos = prefabricat_map.get(art, [])
                 if producer_wos:
                     wos_str = ",".join(str(w) for w in producer_wos)
-                    wo_block = (
-                        "blocat_prefabricat",
-                        f"prefabricat:{wos_str}:{art}",
-                    )
+                    # Check if any producer WO has a planned end date in this session
+                    producer_end_dates = [wo_last_end[pwo] for pwo in producer_wos if pwo in wo_last_end]
+                    for (fw, _fp), fr in frozen_ops.items():
+                        if fw in producer_wos and fr.data_end:
+                            producer_end_dates.append(fr.data_end)
+                    if producer_end_dates:
+                        # Producer is planned → this WO is previzionat (starts after producer finishes)
+                        semi_end_date = max(producer_end_dates).date()
+                        wo_previzionat_start = max(wo_previzionat_start, semi_end_date) if wo_previzionat_start else semi_end_date
+                        wo_previzionat_reason = (
+                            wo_previzionat_reason + "+semifabricat" if wo_previzionat_reason else "semifabricat"
+                        )
+                    else:
+                        # Producer not yet planned → hard block
+                        wo_block = (
+                            "blocat_semifabricat",
+                            f"prefabricat:{wos_str}:{art}",
+                        )
                 else:
                     wo_block = (
                         "no_material",
@@ -434,10 +449,10 @@ def run_planning(
                     "bt+material" if wo_previzionat_reason == "bt" else "material"
                 )
 
-        # Reserve materials only if WO is not hard-blocked.
-        # Previzionat WOs are considered committed (material will arrive), so
-        # we still deduct their stock to avoid double-counting.
-        if wo_block is None and not material_lipsit:
+        # Reserve materials if WO is not hard-blocked.
+        # Previzionat WOs (material arriving later / semifabricat in production) are
+        # still committed — deduct their stock to prevent double-allocation downstream.
+        if wo_block is None:
             for art, cantitate in materiale:
                 stoc_tracker[art] = stoc_tracker.get(art, 0.0) - cantitate
 
@@ -456,7 +471,7 @@ def run_planning(
         # Priority: open=2, placed(planned/previzionat*)=1, completed=0  (higher = more restrictive)
         _STATUS_PRIO = {
             "completed": 0,
-            "planned": 1, "previzionat_bt": 1, "previzionat_material": 1,
+            "planned": 1, "previzionat_bt": 1, "previzionat_material": 1, "previzionat_semifabricat": 1,
             "open": 2,
         }
 
@@ -476,6 +491,11 @@ def run_planning(
             key = (disp.wo, disp.op)
             if key in frozen_ops:
                 fr = frozen_ops[key]
+                # Auto-unfreeze: if the operation is now completed in ERP, don't carry the frozen slot
+                if calc_remaining_time(disp) <= 0:
+                    update_rank(rank, "completed")
+                    stats["completed"] += 1
+                    continue
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id,
                     dispatch_id=disp.id,
@@ -536,7 +556,7 @@ def run_planning(
                 if prev_status == "open":
                     blocked = True
                     break
-                if prev_status in ("planned", "previzionat_bt", "previzionat_material") and prev_rank in rank_end_date:
+                if prev_status in ("planned", "previzionat_bt", "previzionat_material", "previzionat_semifabricat") and prev_rank in rank_end_date:
                     # Must start after predecessor finishes (hour precision)
                     earliest_start = max(
                         earliest_start,
@@ -600,12 +620,14 @@ def run_planning(
 
                 if wo_previzionat_start is None:
                     final_status = "planned"
-                elif wo_previzionat_reason == "bt":
-                    final_status = "previzionat_bt"
+                elif "bt" in wo_previzionat_reason:
+                    final_status = "previzionat_bt"      # BT is the primary constraint
                 elif wo_previzionat_reason == "material":
                     final_status = "previzionat_material"
+                elif wo_previzionat_reason == "semifabricat":
+                    final_status = "previzionat_semifabricat"
                 else:
-                    final_status = "previzionat_bt"   # bt+material — BT is the primary constraint
+                    final_status = "previzionat_bt"      # fallback
 
                 db.add(PlanificareRezultat(
                     sesiune_id=sesiune.id, dispatch_id=disp.id,
@@ -639,7 +661,7 @@ def run_planning(
     total = sum(v for k, v in stats.items() if k != "completed")
     sesiune.status = "completed"
     sesiune.total_operatii = total + stats["completed"]
-    previzionat_total = stats["previzionat_bt"] + stats["previzionat_material"]
+    previzionat_total = stats["previzionat_bt"] + stats["previzionat_material"] + stats.get("previzionat_semifabricat", 0)
     sesiune.operatii_planificate = stats["planned"] + previzionat_total
     sesiune.operatii_neplanificate = total - stats["planned"] - previzionat_total
     db.commit()

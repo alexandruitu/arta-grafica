@@ -14,27 +14,37 @@ function fmtDateTime(iso: string | null | undefined): string {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  planned:              'Planificat',
-  previzionat_bt:       'Previzionat (fără BT)',
-  previzionat_material: 'Previzionat (fără mat.)',
-  no_material:          'Fără Material',
-  no_resource:          'Fără Resursă',
-  blocked_by_rank:      'Blocat Rank',
-  no_bt:                'Fără BT',
+  planned:                  'Planificat',
+  previzionat_bt:           'Previzionat (fără BT)',
+  previzionat_material:     'Previzionat (fără mat.)',
+  previzionat_semifabricat: 'Previzionat (semifabricat)',
+  no_material:              'Fără Material',
+  no_resource:              'Fără Resursă',
+  blocked_by_rank:          'Blocat Rank',
+  no_bt:                    'Fără BT',
+  blocat_semifabricat:      'Blocat Semifabricat',
+  blocat_prefabricat:       'Blocat Prefabricat',  // backward compat
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  planned:              'bg-green-100 text-green-700',
-  previzionat_bt:       'bg-blue-100 text-blue-700',
-  previzionat_material: 'bg-cyan-100 text-cyan-700',
-  no_material:          'bg-red-100 text-red-700',
-  no_resource:          'bg-slate-100 text-slate-600',
-  blocked_by_rank:      'bg-amber-100 text-amber-700',
-  no_bt:                'bg-orange-100 text-orange-700',
+  planned:                  'bg-green-100 text-green-700',
+  previzionat_bt:           'bg-blue-100 text-blue-700',
+  previzionat_material:     'bg-cyan-100 text-cyan-700',
+  previzionat_semifabricat: 'bg-violet-100 text-violet-700',
+  no_material:              'bg-red-100 text-red-700',
+  no_resource:              'bg-slate-100 text-slate-600',
+  blocked_by_rank:          'bg-amber-100 text-amber-700',
+  no_bt:                    'bg-orange-100 text-orange-700',
+  blocat_semifabricat:      'bg-fuchsia-100 text-fuchsia-700',
+  blocat_prefabricat:       'bg-fuchsia-100 text-fuchsia-700',
 };
 
-const PREVIZIONAT_SET = new Set(['previzionat_bt', 'previzionat_material']);
-const PLACED_SET      = new Set(['planned', 'previzionat_bt', 'previzionat_material']);
+const PREVIZIONAT_SET = new Set([
+  'previzionat_bt', 'previzionat_material', 'previzionat_semifabricat',
+]);
+const PLACED_SET = new Set([
+  'planned', 'previzionat_bt', 'previzionat_material', 'previzionat_semifabricat',
+]);
 
 function statusBadge(status: string) {
   return (
@@ -44,43 +54,70 @@ function statusBadge(status: string) {
   );
 }
 
+/** Shortened version of motiv for inline display (with full text on hover) */
+function shortMotiv(motiv: string | null | undefined): string {
+  if (!motiv) return '';
+  // "prefabricat:<wos>:<article>" — show just the article code
+  if (motiv.startsWith('prefabricat:')) {
+    const parts = motiv.split(':');
+    const art = parts.length >= 3 ? parts[2] : '';
+    return art.slice(0, 30) || motiv.slice(0, 30);
+  }
+  // "Stoc insuficient ART: …" — show article code
+  const matMatch = motiv.match(/Stoc insuficient ([^:]+)/);
+  if (matMatch) return matMatch[1].slice(0, 30);
+  // Generic truncation
+  return motiv.length > 38 ? motiv.slice(0, 38) + '…' : motiv;
+}
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function PlanningList() {
-  const [allResults,    setAllResults]    = useState<any[]>([]);
-  const [centreLucru,   setCentreLucru]   = useState<any[]>([]);
-  const [selectedCL,    setSelectedCL]    = useState('');
+  const [allResults,     setAllResults]     = useState<any[]>([]);
+  const [centreLucru,    setCentreLucru]    = useState<any[]>([]);
+  const [selectedCL,     setSelectedCL]     = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
-  const [search,        setSearch]        = useState('');
-  const [loading,       setLoading]       = useState(false);
-  const [serverStats,   setServerStats]   = useState<Record<string, number>>({});
+  const [selectedResursa, setSelectedResursa] = useState('');
+  const [search,         setSearch]         = useState('');
+  const [loading,        setLoading]        = useState(false);
 
   useEffect(() => {
     api.getCentreLucru().then(setCentreLucru).catch(() => {});
-    api.getPlanningStats().then(setServerStats).catch(() => {});
   }, []);
 
   const loadResults = async () => {
     setLoading(true);
     // Only server-side filter by CL (stable, high-cardinality).
-    // Status + search are applied client-side for instant response.
+    // Status + resource + search are applied client-side for instant response.
     const params: Record<string, string> = {};
     if (selectedCL) params.cl = selectedCL;
     try {
       const data = await api.getPlanningOperatii(params);
       setAllResults(data);
-      api.getPlanningStats().then(setServerStats).catch(() => {});
     } catch { setAllResults([]); }
     setLoading(false);
   };
 
   useEffect(() => { loadResults(); }, [selectedCL]);
 
+  // ── Distinct resources (for filter dropdown) ───────────────────────────────
+  const resurseList = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const r of allResults) {
+      if (r.resursa_nume && !seen.has(r.resursa_nume)) {
+        seen.add(r.resursa_nume);
+        list.push(r.resursa_nume);
+      }
+    }
+    return list.sort();
+  }, [allResults]);
+
   // ── Client-side filtering ──────────────────────────────────────────────────
   const filteredResults = useMemo(() => {
     const s = search.toLowerCase().trim();
     return allResults.filter(r => {
-      // Status filter — "previzionat" matches both sub-types
+      // Status filter — "previzionat" matches all sub-types
       if (selectedStatus) {
         if (selectedStatus === 'previzionat') {
           if (!PREVIZIONAT_SET.has(r.status)) return false;
@@ -88,7 +125,9 @@ export default function PlanningList() {
           if (r.status !== selectedStatus) return false;
         }
       }
-      // Search contains: WO (numeric string), client, articol
+      // Resource filter
+      if (selectedResursa && r.resursa_nume !== selectedResursa) return false;
+      // Search: WO (numeric string), client, articol
       if (s) {
         const woMatch     = String(r.wo).includes(s);
         const clientMatch = (r.client  || '').toLowerCase().includes(s);
@@ -97,24 +136,21 @@ export default function PlanningList() {
       }
       return true;
     });
-  }, [allResults, selectedStatus, search]);
+  }, [allResults, selectedStatus, selectedResursa, search]);
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
-  const oreTotal = useMemo(
-    () => filteredResults.filter(r => PLACED_SET.has(r.status)).reduce((s, r) => s + (r.durata_ore || 0), 0),
-    [filteredResults]
-  );
-
-  const stats = {
-    total:       serverStats.total           ?? allResults.length,
-    planned:     serverStats.planned         ?? 0,
-    previzionat: serverStats.previzionat     ?? 0,
-    no_material: serverStats.no_material     ?? 0,
-    no_bt:       serverStats.no_bt           ?? 0,
-    blocked:     serverStats.blocked_by_rank ?? 0,
-    no_resource: serverStats.no_resource     ?? 0,
-    ore:         oreTotal,
-  };
+  // ── Stats computed from filtered results (2.5) ─────────────────────────────
+  const stats = useMemo(() => {
+    const planned     = filteredResults.filter(r => r.status === 'planned').length;
+    const previzionat = filteredResults.filter(r => PREVIZIONAT_SET.has(r.status)).length;
+    const no_material = filteredResults.filter(r => r.status === 'no_material').length;
+    const no_bt       = filteredResults.filter(r => r.status === 'no_bt').length;
+    const blocked     = filteredResults.filter(r => r.status === 'blocked_by_rank').length;
+    const no_resource = filteredResults.filter(r => r.status === 'no_resource').length;
+    const ore         = filteredResults
+      .filter(r => PLACED_SET.has(r.status))
+      .reduce((s, r) => s + (r.durata_ore || 0), 0);
+    return { total: filteredResults.length, planned, previzionat, no_material, no_bt, blocked, no_resource, ore };
+  }, [filteredResults]);
 
   const handleToggleFrozen = async (id: number, currentFrozen: boolean) => {
     try {
@@ -138,8 +174,17 @@ export default function PlanningList() {
         <select value={selectedCL} onChange={e => setSelectedCL(e.target.value)}
           className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
           <option value="">Toate centrele de lucru</option>
-          {centreLucru.map(cl => (
+          {centreLucru.filter(cl => cl.cl).map(cl => (
             <option key={cl.cl} value={cl.cl}>{cl.cl} – {cl.denumire}</option>
+          ))}
+        </select>
+
+        {/* Resource filter (2.6) */}
+        <select value={selectedResursa} onChange={e => setSelectedResursa(e.target.value)}
+          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
+          <option value="">Toate resursele</option>
+          {resurseList.map(r => (
+            <option key={r} value={r}>{r}</option>
           ))}
         </select>
 
@@ -151,10 +196,12 @@ export default function PlanningList() {
           <option value="previzionat">Previzionat (toate)</option>
           <option value="previzionat_bt">Previzionat – fără BT</option>
           <option value="previzionat_material">Previzionat – fără material</option>
+          <option value="previzionat_semifabricat">Previzionat – semifabricat</option>
           <option value="no_material">Fără Material (blocat)</option>
           <option value="no_resource">Fără Resursă</option>
           <option value="blocked_by_rank">Blocat Rank</option>
           <option value="no_bt">Fără BT (blocat)</option>
+          <option value="blocat_semifabricat">Blocat Semifabricat</option>
         </select>
 
         {/* Search */}
@@ -175,22 +222,22 @@ export default function PlanningList() {
       {/* ── AI Assistant ── */}
       <AIAssistant tab="planificare" />
 
-      {/* ── Stats cards (clickable) ── */}
+      {/* ── Stats cards (clickable, reflect filtered results — 2.5) ── */}
       {allResults.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500 mb-0.5">Total sesiune</p>
+            <p className="text-xs text-slate-500 mb-0.5">Total afișat</p>
             <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
-            <p className="text-xs text-slate-400">operații</p>
+            <p className="text-xs text-slate-400">din {allResults.length} op.</p>
           </div>
 
           {[
-            { key: 'planned',        label: 'Planificate',    value: stats.planned,     color: 'green',  sub: `${stats.ore.toFixed(0)} ore` },
-            { key: 'previzionat',    label: 'Previzionate',   value: stats.previzionat, color: 'blue',   sub: 'programate viitor' },
-            { key: 'no_material',    label: 'Fără Material',  value: stats.no_material, color: 'red',    sub: 'stoc insuficient' },
-            { key: 'no_bt',          label: 'Fără BT',        value: stats.no_bt,       color: 'orange', sub: 'bun de tipar' },
-            { key: 'blocked_by_rank',label: 'Blocate Rank',   value: stats.blocked,     color: 'amber',  sub: 'aşteaptă predec.' },
-            { key: 'no_resource',    label: 'Fără Resursă',   value: stats.no_resource, color: 'slate',  sub: 'nemapate' },
+            { key: 'planned',         label: 'Planificate',   value: stats.planned,     color: 'green',  sub: `${stats.ore.toFixed(0)} ore` },
+            { key: 'previzionat',     label: 'Previzionate',  value: stats.previzionat, color: 'blue',   sub: 'programate viitor' },
+            { key: 'no_material',     label: 'Fără Material', value: stats.no_material, color: 'red',    sub: 'stoc insuficient' },
+            { key: 'no_bt',           label: 'Fără BT',       value: stats.no_bt,       color: 'orange', sub: 'bun de tipar' },
+            { key: 'blocked_by_rank', label: 'Blocate Rank',  value: stats.blocked,     color: 'amber',  sub: 'aşteaptă predec.' },
+            { key: 'no_resource',     label: 'Fără Resursă',  value: stats.no_resource, color: 'slate',  sub: 'nemapate' },
           ].map(({ key, label, value, color, sub }) => {
             const active = selectedStatus === key;
             return (
@@ -228,7 +275,6 @@ export default function PlanningList() {
                 <th className="px-3 py-2 text-left whitespace-nowrap">Start</th>
                 <th className="px-3 py-2 text-left whitespace-nowrap">Stop</th>
                 <th className="px-3 py-2 text-right whitespace-nowrap">Durata (h)</th>
-                <th className="px-3 py-2 text-left">Motiv</th>
               </tr>
             </thead>
             <tbody>
@@ -244,9 +290,18 @@ export default function PlanningList() {
                   <td className="px-3 py-2 text-xs max-w-[160px] truncate" title={r.articol}>
                     {r.articol || '—'}
                   </td>
-                  <td className="px-3 py-2">
+                  {/* Status cell — badge + inline motiv (2.4) */}
+                  <td className="px-3 py-2 min-w-[160px]">
                     {r.frozen && <span className="text-purple-400 mr-1 text-xs">❄</span>}
                     {statusBadge(r.status)}
+                    {r.motiv && (
+                      <span
+                        className="block text-xs text-slate-400 mt-0.5 leading-tight"
+                        title={r.motiv}
+                      >
+                        ({shortMotiv(r.motiv)})
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     {PLACED_SET.has(r.status) ? (
@@ -268,7 +323,6 @@ export default function PlanningList() {
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDateTime(r.data_start)}</td>
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDateTime(r.data_end)}</td>
                   <td className="px-3 py-2 text-right text-xs">{r.durata_ore?.toFixed(1)}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500 min-w-[280px]">{r.motiv || '—'}</td>
                 </tr>
               ))}
             </tbody>

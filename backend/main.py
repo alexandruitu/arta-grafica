@@ -46,9 +46,10 @@ class PlanOptions(_BaseModel):
     ignore_rank: bool = False
 
 # Status constants — must match planner.py output
-PREVIZIONAT_STATUSES = {"previzionat", "previzionat_bt", "previzionat_material"}
+PREVIZIONAT_STATUSES = {"previzionat", "previzionat_bt", "previzionat_material", "previzionat_semifabricat"}
 PLACED_STATUSES      = {"planned"} | PREVIZIONAT_STATUSES   # ops that got a time slot
-BLOCKED_STATUSES     = {"no_bt", "no_material", "no_resource", "blocked_by_rank"}
+BLOCKED_STATUSES     = {"no_bt", "no_material", "no_resource", "blocked_by_rank",
+                         "blocat_semifabricat", "blocat_prefabricat"}
 
 app = FastAPI(title="Arta Grafica - Production Planning", version="1.0.0")
 
@@ -224,9 +225,9 @@ def get_comanda_operatii(cp: int, db: Session = Depends(get_db)):
             # Sort by start time
             coada.sort(key=lambda x: x["start"])
 
-        # Parse prefabricat info when the op is blocked by a prefabricat
+        # Parse prefabricat info when the op is blocked/previzionat due to a semifabricat
         prefabricat_info = None
-        if r and r.status == "blocat_prefabricat" and r.motiv and r.motiv.startswith("prefabricat:"):
+        if r and r.status in ("blocat_prefabricat", "blocat_semifabricat", "previzionat_semifabricat") and r.motiv and r.motiv.startswith("prefabricat:"):
             parts = r.motiv.split(":", 2)  # ["prefabricat", "wo1,wo2", "stock_code"]
             try:
                 producer_wos = [int(w) for w in parts[1].split(",") if w]
@@ -424,7 +425,7 @@ def get_gantt_data(
 
         if r.frozen:
             custom_class = "bar-frozen-late" if is_late else "bar-frozen-ok"
-        elif r.status in ("previzionat", "previzionat_bt", "previzionat_material"):
+        elif r.status in ("previzionat", "previzionat_bt", "previzionat_material", "previzionat_semifabricat"):
             custom_class = "bar-late" if is_late else "bar-previzionat"
         else:
             custom_class = "bar-late" if is_late else "bar-planned"
@@ -538,21 +539,24 @@ def get_board_data(db: Session = Depends(get_db)):
         if op.frozen:
             # portocaliu = frozen dar imposibil (fara material sau blocat de rank)
             return "#ea580c" if op.status in ("no_material", "blocked_by_rank") else "#7c3aed"
-        if op.status in ("previzionat", "previzionat_bt", "previzionat_material"):
-            return "#2563eb"   # albastru — previzionat (fara BT sau fara material curent)
+        if op.status in ("previzionat", "previzionat_bt", "previzionat_material", "previzionat_semifabricat"):
+            return "#2563eb"   # albastru — previzionat (fara BT / material / semifabricat)
         if is_late:
             return "#dc2626"   # rosu — intarziat
         return "#16a34a"       # verde — planificat, neintarziat
 
     status_label_map = {
-        "planned":              "Planificat",
-        "previzionat":          "Previzionat",
-        "previzionat_bt":       "Previzionat (fără BT)",
-        "previzionat_material": "Previzionat (fără material)",
-        "no_bt":                "Blocat – fără BT",
-        "no_material":          "Blocat – fără material",
-        "no_resource":          "Blocat – fără resursă",
-        "blocked_by_rank":      "Blocat – rank",
+        "planned":                    "Planificat",
+        "previzionat":                "Previzionat",
+        "previzionat_bt":             "Previzionat (fără BT)",
+        "previzionat_material":       "Previzionat (fără material)",
+        "previzionat_semifabricat":   "Previzionat (semifabricat în producție)",
+        "no_bt":                      "Blocat – fără BT",
+        "no_material":                "Blocat – fără material",
+        "no_resource":                "Blocat – fără resursă",
+        "blocked_by_rank":            "Blocat – rank",
+        "blocat_semifabricat":        "Blocat – semifabricat neplanificat",
+        "blocat_prefabricat":         "Blocat – prefabricat",
     }
 
     items: list = []
@@ -934,7 +938,8 @@ def get_stats(db: Session = Depends(get_db)):
             c.cp: (c.data_actualizata_livrare or c.dt_livr_prod)
             for c in db.query(Comanda).all()
         }
-        BLOCKED_STATUSES = {"no_material", "no_resource", "no_bt", "blocked_by_rank"}
+        BLOCKED_STATUSES = {"no_material", "no_resource", "no_bt", "blocked_by_rank",
+                             "blocat_semifabricat", "blocat_prefabricat"}
         by_wo: dict = {}
         for r in db.query(PlanificareRezultat).filter(
             PlanificareRezultat.sesiune_id == sesiune.id
@@ -1121,7 +1126,8 @@ def _build_ai_context(question_id: str, db: Session) -> tuple[str, str]:
             db.query(PlanificareRezultat)
             .filter(PlanificareRezultat.sesiune_id == sesiune.id)
             .filter(PlanificareRezultat.status.in_(
-                ["no_material", "blocked_by_rank", "no_resource", "no_bt"]
+                ["no_material", "blocked_by_rank", "no_resource", "no_bt",
+                 "blocat_semifabricat", "blocat_prefabricat"]
             ))
             .order_by(PlanificareRezultat.wo)
             .limit(60)
@@ -1269,8 +1275,11 @@ def _build_ai_context(question_id: str, db: Session) -> tuple[str, str]:
             f"Se selectează resursa cu cel mai devreme slot disponibil (load balancing). "
             f"Operațiile aceluiași WO sunt mereu secvențiale (nu paralele).\n"
             f"7. CALCUL TIMP: ore_necesare = max(0, P_Setup + P_Runtime - R_Runtime).\n"
-            f"8. STATUT FINAL: planned / previzionat_bt / previzionat_material / "
-            f"no_material / blocat_prefabricat / blocked_by_rank / no_bt / no_resource.\n"
+            f"8. STATUT FINAL: planned / previzionat_bt / previzionat_material / previzionat_semifabricat / "
+            f"no_material / blocat_semifabricat / blocked_by_rank / no_bt / no_resource.\n"
+            f"   previzionat_semifabricat = materialul e produs de un alt WO intern PLANIFICAT → "
+            f"productia poate incepe dupa ce cel intern se termina.\n"
+            f"   blocat_semifabricat = materialul e produs intern dar acel WO NU e inca planificat.\n"
         )
         return question, context
 
