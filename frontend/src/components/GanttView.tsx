@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 // @ts-ignore – frappe-gantt has no type declarations
 import Gantt from 'frappe-gantt';
 import { api } from '../api/client';
-import { Search, Lock, Unlock, X, List, RefreshCw } from 'lucide-react';
+import { Search, Lock, Unlock, X, List, RefreshCw, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 interface GanttTask {
   id: string;
@@ -37,12 +37,15 @@ interface SelectedOp {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  planned:         'Planificat',
-  previzionat:     'Previzionat',
-  no_material:     'Fără material',
-  no_resource:     'Fără resursă',
-  no_bt:           'Fără BT',
-  blocked_by_rank: 'Blocat (rank)',
+  planned:                  'Planificat',
+  previzionat:              'Previzionat',
+  previzionat_bt:           'Previzionat (BT lipsă)',
+  previzionat_material:     'Previzionat (material insuficient)',
+  previzionat_semifabricat: 'Previzionat (semifabricat în producție)',
+  no_material:              'Fără material',
+  no_resource:              'Fără resursă',
+  no_bt:                    'Fără BT',
+  blocked_by_rank:          'Blocat (rank)',
 };
 
 export default function GanttView() {
@@ -99,6 +102,28 @@ export default function GanttView() {
     if (!showFrozen) loadFrozen();
     setShowFrozen(v => !v);
   };
+
+  const scrollToToday = useCallback(() => {
+    const wrapper = wrapperRef.current;
+    const svgEl = containerRef.current?.querySelector('svg.gantt') as SVGElement | null;
+    if (!wrapper || !svgEl) return;
+    const todayEl = svgEl.querySelector('.current-highlight') as SVGElement | null;
+    if (todayEl) {
+      const x = parseFloat(todayEl.getAttribute('x') || '0') ||
+        (() => { const m = (todayEl.getAttribute('transform') || '').match(/translate\(([^,)]+)/); return m ? parseFloat(m[1]) : 0; })();
+      if (x > 0) { wrapper.scrollLeft = Math.max(0, x - wrapper.clientWidth / 2); return; }
+    }
+    const firstBar = svgEl.querySelector('.bar-wrapper rect.bar') as SVGRectElement | null;
+    if (firstBar) wrapper.scrollLeft = Math.max(0, parseFloat(firstBar.getAttribute('x') || '0') - 100);
+  }, []);
+
+  const scrollPrev = useCallback(() => {
+    if (wrapperRef.current) wrapperRef.current.scrollLeft -= wrapperRef.current.clientWidth * 0.75;
+  }, []);
+
+  const scrollNext = useCallback(() => {
+    if (wrapperRef.current) wrapperRef.current.scrollLeft += wrapperRef.current.clientWidth * 0.75;
+  }, []);
 
   // Build and render Gantt chart
   useEffect(() => {
@@ -209,11 +234,11 @@ export default function GanttView() {
   };
 
   const LEGEND = [
-    { color: '#16a34a', label: 'Planificat (neîntârziat)' },
-    { color: '#2563eb', label: 'Previzionat (fără BT)' },
+    { color: '#16a34a', label: 'Planificat' },
+    { color: '#2563eb', label: 'Previzionat (BT / material / semifabricat)' },
     { color: '#7c3aed', label: 'Frozen (în termen)' },
     { color: '#ea580c', label: 'Frozen (depășit termen)' },
-    { color: '#dc2626', label: 'Întârziat' },
+    { color: '#dc2626', label: 'Întârziat față de livrare' },
   ];
 
   return (
@@ -262,7 +287,27 @@ export default function GanttView() {
           ))}
         </div>
 
+        {/* Navigation: prev / today / next */}
+        <div className="flex items-center gap-1">
+          <button onClick={scrollPrev}
+            title="Înainte"
+            className="p-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+            <ChevronLeft size={15} />
+          </button>
+          <button onClick={scrollToToday}
+            title="Mergi la azi"
+            className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm">
+            <Calendar size={13} /> Azi
+          </button>
+          <button onClick={scrollNext}
+            title="Înainte"
+            className="p-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+            <ChevronRight size={15} />
+          </button>
+        </div>
+
         <button onClick={loadGantt}
+          title="Reîncarcă"
           className="p-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
           <RefreshCw size={15} />
         </button>

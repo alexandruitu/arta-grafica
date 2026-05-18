@@ -349,7 +349,7 @@ def get_gantt_data(
     q = (
         db.query(PlanificareRezultat)
         .filter(PlanificareRezultat.sesiune_id == sesiune.id)
-        .filter(PlanificareRezultat.status == "planned")
+        .filter(PlanificareRezultat.status.in_(PLACED_STATUSES))
     )
     if cl:
         q = q.filter(PlanificareRezultat.cl == cl)
@@ -396,11 +396,11 @@ def get_gantt_data(
         o.cod: o
         for o in db.query(Operatie).filter(Operatie.cod.in_(op_ids)).all()
     }
-    # All planned ops for this session for the WOs in our result set (for dependency computation)
+    # All placed ops for this session for the WOs in our result set (for dependency computation)
     all_planned = (
         db.query(PlanificareRezultat)
         .filter(PlanificareRezultat.sesiune_id == sesiune.id)
-        .filter(PlanificareRezultat.status == "planned")
+        .filter(PlanificareRezultat.status.in_(PLACED_STATUSES))
         .filter(PlanificareRezultat.wo.in_(wo_ids))
         .all()
     )
@@ -482,6 +482,179 @@ def get_gantt_data(
     # Sort by WO then by planned start date so rank order is visible in Gantt rows
     tasks.sort(key=lambda t: (t.wo, t.start))
     return tasks
+
+
+# ── Excel export ──────────────────────────────────────────────────────────────
+@app.get("/api/planificare/export-xlsx")
+def export_planning_xlsx(
+    status: Optional[str] = Query(None),
+    cl: Optional[str] = Query(None),
+    resursa: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Export current planning results as Excel (.xlsx).
+    Optional query filters: status, cl, resursa, search (client/articol/WO).
+    """
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    sesiune = db.query(PlanificareSesiune).order_by(PlanificareSesiune.id.desc()).first()
+    if not sesiune:
+        raise HTTPException(status_code=404, detail="Nicio sesiune de planificare gasita.")
+
+    q = (
+        db.query(PlanificareRezultat)
+        .filter(PlanificareRezultat.sesiune_id == sesiune.id)
+    )
+    if status:
+        statuses = [s.strip() for s in status.split(",")]
+        q = q.filter(PlanificareRezultat.status.in_(statuses))
+    if cl:
+        q = q.filter(PlanificareRezultat.cl == cl)
+    if resursa:
+        q = q.filter(PlanificareRezultat.resursa_nume == resursa)
+
+    results = q.order_by(PlanificareRezultat.wo, PlanificareRezultat.data_start).all()
+
+    # Bulk-load comenzi for client/articol/delivery info
+    wo_ids = {r.wo for r in results}
+    comanda_map = {c.cp: c for c in db.query(Comanda).filter(Comanda.cp.in_(wo_ids)).all()}
+
+    # Optional search filter (applied in-memory after comanda_map is ready)
+    if search:
+        sl = search.lower()
+        def _match(r):
+            if sl in str(r.wo).lower():
+                return True
+            c = comanda_map.get(r.wo)
+            if c:
+                if c.client and sl in c.client.lower():
+                    return True
+                if c.articol and sl in c.articol.lower():
+                    return True
+            return False
+        results = [r for r in results if _match(r)]
+
+    STATUS_LABEL_RO = {
+        "planned":                  "Planificat",
+        "previzionat_bt":           "Previzionat (BT lipsă)",
+        "previzionat_material":     "Previzionat (material insuficient)",
+        "previzionat_semifabricat": "Previzionat (semifabricat în producție)",
+        "no_material":              "Fără Material",
+        "no_bt":                    "Fără BT",
+        "blocked_by_rank":          "Blocat Rank",
+        "no_resource":              "Fără Resursă",
+        "blocat_semifabricat":      "Blocat – semifabricat neplanificat",
+        "blocat_prefabricat":       "Blocat – prefabricat",
+        "completed":                "Finalizat",
+    }
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Planificare"
+
+    HEADER_FILL = PatternFill("solid", fgColor="1E3A5F")
+    HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
+    ALT_FILL    = PatternFill("solid", fgColor="EFF4FB")
+    BORDER_SIDE = Side(style="thin", color="CCCCCC")
+    CELL_BORDER = Border(left=BORDER_SIDE, right=BORDER_SIDE, top=BORDER_SIDE, bottom=BORDER_SIDE)
+
+    STATUS_ROW_COLOR = {
+        "planned":                  "D4EDDA",
+        "previzionat_bt":           "CCE5FF",
+        "previzionat_material":     "E2D9F3",
+        "previzionat_semifabricat": "D6EAF8",
+        "no_material":              "F8D7DA",
+        "no_bt":                    "FFF3CD",
+        "blocked_by_rank":          "FFE5CC",
+        "no_resource":              "F8D7DA",
+        "blocat_semifabricat":      "F8D7DA",
+        "blocat_prefabricat":       "F8D7DA",
+        "completed":                "E9ECEF",
+    }
+
+    headers = [
+        "WO", "Operație", "CL", "Resursă",
+        "Client", "Articol",
+        "Start", "Sfârșit", "Durată (h)",
+        "Status", "Motiv",
+        "Data livrare", "Întârziat", "Înghețat",
+    ]
+    col_widths = [9, 9, 18, 20, 24, 28, 18, 18, 11, 28, 36, 14, 10, 9]
+
+    ws.row_dimensions[1].height = 18
+    for col_idx, (hdr, width) in enumerate(zip(headers, col_widths), start=1):
+        cell = ws.cell(row=1, column=col_idx, value=hdr)
+        cell.font   = HEADER_FONT
+        cell.fill   = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=False)
+        cell.border = CELL_BORDER
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    ws.freeze_panes = "A2"
+
+    for row_idx, r in enumerate(results, start=2):
+        comanda = comanda_map.get(r.wo)
+        delivery = (comanda.data_actualizata_livrare or comanda.dt_livr_prod) if comanda else None
+        if delivery and r.data_end:
+            is_late = r.data_end.date() > delivery
+        else:
+            is_late = False
+
+        row_fill_hex = STATUS_ROW_COLOR.get(r.status, "FFFFFF")
+        row_fill = PatternFill("solid", fgColor=row_fill_hex) if row_idx % 2 == 0 else (
+            PatternFill("solid", fgColor=row_fill_hex)
+        )
+        # Alternate row shading: use slightly lighter shade on odd rows when status matches
+        # For simplicity just use status color for all rows
+
+        row_data = [
+            r.wo,
+            str(r.op),
+            r.cl or "",
+            r.resursa_nume or "",
+            comanda.client if comanda else "",
+            comanda.articol if comanda else "",
+            r.data_start.strftime("%Y-%m-%d %H:%M") if r.data_start else "",
+            r.data_end.strftime("%Y-%m-%d %H:%M") if r.data_end else "",
+            round(r.durata_ore, 2) if r.durata_ore else 0,
+            STATUS_LABEL_RO.get(r.status, r.status),
+            r.motiv or "",
+            delivery.strftime("%Y-%m-%d") if delivery else "",
+            "DA" if is_late else "NU",
+            "DA" if r.frozen else "NU",
+        ]
+        for col_idx, value in enumerate(row_data, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.fill   = row_fill
+            cell.border = CELL_BORDER
+            cell.alignment = Alignment(vertical="center")
+            if col_idx in (7, 8):  # date columns
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            if col_idx in (9,):    # numeric
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    # Auto-filter on header row
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from urllib.parse import quote as _quote
+    filename = f"planificare_{sesiune.created_at.strftime('%Y%m%d_%H%M') if sesiune.created_at else 'export'}.xlsx"
+    encoded_name = _quote(filename)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        },
+    )
 
 
 @app.get("/api/planificare/board")

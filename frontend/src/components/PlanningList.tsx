@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import AIAssistant from './AIAssistant';
+import { Download } from 'lucide-react';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export default function PlanningList() {
   const [selectedResursa, setSelectedResursa] = useState('');
   const [search,         setSearch]         = useState('');
   const [loading,        setLoading]        = useState(false);
+  const [exporting,      setExporting]      = useState(false);
 
   useEffect(() => {
     api.getCentreLucru().then(setCentreLucru).catch(() => {});
@@ -164,6 +166,35 @@ export default function PlanningList() {
   const toggleStatusFilter = (s: string) =>
     setSelectedStatus(prev => (prev === s ? '' : s));
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params: Record<string, string> = {};
+      if (selectedCL)      params.cl      = selectedCL;
+      if (selectedResursa) params.resursa  = selectedResursa;
+      if (selectedStatus) {
+        params.status = selectedStatus === 'previzionat'
+          ? 'previzionat_bt,previzionat_material,previzionat_semifabricat'
+          : selectedStatus;
+      }
+      if (search) params.search = search;
+      const res = await api.exportPlanningXlsx(params);
+      if (!res.ok) throw new Error(`Export eșuat: ${res.status}`);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const cd   = res.headers.get('Content-Disposition') || '';
+      const m    = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+      a.href     = url;
+      a.download = m ? decodeURIComponent(m[1].replace(/"/g, '')) : 'planificare.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert('Eroare export: ' + e.message);
+    }
+    setExporting(false);
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -212,6 +243,16 @@ export default function PlanningList() {
         <button onClick={loadResults}
           className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium">
           ↺ Reîncarcă
+        </button>
+
+        <button
+          onClick={handleExport}
+          disabled={exporting || filteredResults.length === 0}
+          title="Exportă rezultatele afișate ca Excel"
+          className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 font-medium disabled:opacity-50"
+        >
+          <Download size={14} />
+          {exporting ? 'Se exportă…' : 'Export Excel'}
         </button>
 
         <span className="ml-auto text-xs text-slate-400">

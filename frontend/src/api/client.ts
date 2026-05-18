@@ -128,6 +128,14 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ data_start }) }
     ),
   getFrozenOps: () => request<any[]>('/planificare/frozen'),
+  exportPlanningXlsx: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    const token = getToken();
+    const url = `${BASE}/planificare/export-xlsx${qs}`;
+    return fetch(url, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  },
 
   // Stoc
   getStoc: (search?: string) => {
