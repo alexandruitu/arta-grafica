@@ -1,4 +1,4 @@
-const BASE = '/api';
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 
 const TOKEN_KEY = 'ag_token';
 
