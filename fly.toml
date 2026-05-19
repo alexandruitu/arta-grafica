@@ -7,10 +7,10 @@ primary_region = "lhr"
 
 [http_service]
   auto_start_machines  = true
-  auto_stop_machines   = true
+  auto_stop_machines   = "stop"
   force_https          = true
   internal_port        = 8_080
-  min_machines_running = 0
+  min_machines_running = 1
 
   [http_service.concurrency]
   type       = "requests"
