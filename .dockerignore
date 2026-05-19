@@ -1,0 +1,8 @@
+frontend/
+data/
+*.xlsx
+~$*.xlsx
+__pycache__/
+*.pyc
+.env
+docs/
