@@ -65,8 +65,8 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    # Public: login endpoint + all static/SPA assets
-    if path == "/api/auth/login" or not path.startswith("/api/"):
+    # Public: login endpoint + all static/SPA assets + CORS preflight
+    if request.method == "OPTIONS" or path == "/api/auth/login" or not path.startswith("/api/"):
         return await call_next(request)
     # Protected: all other /api/* routes
     token = request.headers.get("Authorization", "")
