@@ -19,7 +19,7 @@ export default function ComenziList() {
     const params: Record<string, string> = { limit: '2000' };
     if (search) params.search = search;
     // '__intarziate__' is a client-side pseudo-filter — never send to server
-    if (statusFilter && statusFilter !== '__intarziate__' && statusFilter !== '__neachitate__') params.status = statusFilter;
+    if (statusFilter && statusFilter !== '__intarziate__') params.status = statusFilter;
     if (stadiuFilter) params.stadiu = stadiuFilter;
     try {
       const data = await api.getComenzi(params);
@@ -79,8 +79,6 @@ export default function ComenziList() {
     return map[status] || 'bg-slate-100 text-slate-600';
   };
 
-  const isNeachitat = (c: any) => c.val_de_platit > 0 && c.val_platita < c.val_de_platit;
-
   const liveStats = useMemo(() => ({
     total:      comenzi.length,
     stadiu06:   comenzi.filter(c => c.stadiu_prepress === '06 - In productie').length,
@@ -90,7 +88,6 @@ export default function ComenziList() {
       const ps = planningMap[String(c.cp)];
       return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
     }).length,
-    neachitate: comenzi.filter(isNeachitat).length,
   }), [comenzi, planningMap]);
 
   const hasFilter = !!(search || statusFilter || stadiuFilter);
@@ -101,8 +98,6 @@ export default function ComenziList() {
         const ps = planningMap[String(c.cp)];
         return ps?.intarziere_zile != null && ps.intarziere_zile > 0;
       });
-    if (statusFilter === '__neachitate__')
-      return comenzi.filter(isNeachitat);
     return comenzi;
   }, [comenzi, statusFilter, planningMap]);
 
@@ -142,19 +137,12 @@ export default function ComenziList() {
       active: statusFilter === '__intarziate__',
       onClick: () => { setStatusFilter(statusFilter === '__intarziate__' ? '' : '__intarziate__'); setStadiuFilter(''); },
     },
-    {
-      label: 'Neachitate',
-      value: liveStats.neachitate,
-      color: 'bg-rose-50 text-rose-700 border-rose-200',
-      active: statusFilter === '__neachitate__',
-      onClick: () => { setStatusFilter(statusFilter === '__neachitate__' ? '' : '__neachitate__'); setStadiuFilter(''); },
-    },
   ];
 
   // Split cards: status (exclusive: LIBER+STOP=Total) vs subsets (transversal)
   // statusCards: Total, LIBER, STOP  |  subsetCards: 06-În producție, Întârziate
   const statusCards = [overviewCards[0], overviewCards[2], overviewCards[3]]; // Total, LIBER, STOP
-  const subsetCards = [overviewCards[1], overviewCards[4], overviewCards[5]]; // 06-În producție, Întârziate, Neachitate
+  const subsetCards = [overviewCards[1], overviewCards[4]]; // 06-În producție, Întârziate
 
   return (
     <div className="space-y-4">
@@ -248,7 +236,6 @@ export default function ComenziList() {
                 <th className="px-3 py-2 text-left">Intarziere</th>
                 <th className="px-3 py-2 text-left">St. Plan.</th>
                 <th className="px-3 py-2 text-left">St. Material</th>
-                <th className="px-3 py-2 text-left">Plata</th>
               </tr>
             </thead>
             <tbody>
@@ -309,19 +296,10 @@ export default function ComenziList() {
                           </span>
                         ) : <span className="text-slate-400 text-xs">-</span>}
                       </td>
-                      <td className="px-3 py-2">
-                        {c.val_de_platit > 0 && c.val_platita >= c.val_de_platit ? (
-                          <span className="text-green-600 text-xs">Achitat</span>
-                        ) : c.val_de_platit > 0 ? (
-                          <span className="text-red-600 text-xs">Neachitat</span>
-                        ) : (
-                          <span className="text-slate-400 text-xs">-</span>
-                        )}
-                      </td>
                     </tr>
                     {expandedCP === c.cp && (
                       <tr key={`ops-${c.cp}`}>
-                        <td colSpan={15} className="px-6 py-3 bg-slate-50">
+                        <td colSpan={14} className="px-6 py-3 bg-slate-50">
                           <p className="text-xs font-semibold text-slate-600 mb-2">Operatii pentru WO {c.cp}:</p>
                           {operatii.length === 0 ? (
                             <p className="text-xs text-slate-400">Nicio operație în Dispatch — comanda nu are operații planificate în ERP (nu apare în Dispatch List_AS.xlsx)</p>
