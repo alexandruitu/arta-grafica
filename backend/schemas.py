@@ -20,8 +20,6 @@ class ComandaOut(BaseModel):
     data_estimata_livrare: Optional[date] = None
     data_actualizata_livrare: Optional[date] = None
     dt_livr_prod: Optional[date] = None
-    val_platita: float
-    val_de_platit: float
     ref_client: Optional[str] = None
 
     class Config:

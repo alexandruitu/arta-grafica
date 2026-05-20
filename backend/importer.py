@@ -95,8 +95,6 @@ def import_comenzi(db: Session, filepath: str):
             bt3=safe_str(row.get("BT3")),
             bt4=safe_str(row.get("BT4")),
             data_reala_bt=safe_str(row.get("DataRealaBT")),
-            val_platita=safe_float(row.get("ValPlatita")),
-            val_de_platit=safe_float(row.get("ValDePlatit")),
             cant_plan_cp=safe_float(row.get("CantPlanCP")) if not pd.isna(row.get("CantPlanCP", None)) else None,
             cant_real_cp=safe_float(row.get("CantRealCP")) if not pd.isna(row.get("CantRealCP", None)) else None,
             observatii=safe_str(row.get("Observatii")),

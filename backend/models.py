@@ -29,8 +29,6 @@ class Comanda(Base):
     bt3 = Column(String, nullable=True)
     bt4 = Column(String, nullable=True)
     data_reala_bt = Column(String, nullable=True)
-    val_platita = Column(Float, default=0)
-    val_de_platit = Column(Float, default=0)
     cant_plan_cp = Column(Float, nullable=True)
     cant_real_cp = Column(Float, nullable=True)
     observatii = Column(Text, nullable=True)
