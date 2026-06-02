@@ -2,6 +2,8 @@ import { useState, useRef } from 'react';
 import { Bot, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { getToken } from '../api/client';
 
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
+
 const QUESTIONS: Record<string, { id: string; label: string }[]> = {
   dashboard: [
     { id: 'dashboard_summary',  label: 'Rezumă situația de azi' },
@@ -47,7 +49,7 @@ export default function AIAssistant({ tab }: Props) {
 
     try {
       const token = getToken();
-      const res = await fetch(`/api/ai/analyze?question_id=${encodeURIComponent(questionId)}`, {
+      const res = await fetch(`${BASE}/ai/analyze?question_id=${encodeURIComponent(questionId)}`, {
         signal: controller.signal,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
