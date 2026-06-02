@@ -21,6 +21,13 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 
 TZ_RO = ZoneInfo("Europe/Bucharest")
+
+def _localize(dt: datetime | None) -> datetime | None:
+    """Attach TZ_RO to naive datetimes read back from SQLite."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=TZ_RO)
+
 from sqlalchemy.orm import Session
 from models import (
     Comanda, DispatchItem, Operatie, Deficit, Resursa, ProgramResursa,
@@ -260,13 +267,15 @@ def run_planning(
     # Pre-populate next_free_time and wo_last_end from frozen operations
     for fr in frozen_ops.values():
         if fr.resursa_id and fr.data_end:
+            end = _localize(fr.data_end)
             existing = next_free_time.get(fr.resursa_id)
-            if existing is None or fr.data_end > existing:
-                next_free_time[fr.resursa_id] = fr.data_end
+            if existing is None or end > existing:
+                next_free_time[fr.resursa_id] = end
         if fr.data_end:
+            end = _localize(fr.data_end)
             wo_existing = wo_last_end.get(fr.wo)
-            if wo_existing is None or fr.data_end > wo_existing:
-                wo_last_end[fr.wo] = fr.data_end
+            if wo_existing is None or end > wo_existing:
+                wo_last_end[fr.wo] = end
 
     # ── Step 4: Build material stock tracker ─────────────────────────────────
     # stoc_tracker[articol] = available quantity (updated as WOs are reserved)
@@ -424,10 +433,10 @@ def run_planning(
                 if producer_wos:
                     wos_str = ",".join(str(w) for w in producer_wos)
                     # Check if any producer WO has a planned end date in this session
-                    producer_end_dates = [wo_last_end[pwo] for pwo in producer_wos if pwo in wo_last_end]
+                    producer_end_dates = [_localize(wo_last_end[pwo]) for pwo in producer_wos if pwo in wo_last_end]
                     for (fw, _fp), fr in frozen_ops.items():
                         if fw in producer_wos and fr.data_end:
-                            producer_end_dates.append(fr.data_end)
+                            producer_end_dates.append(_localize(fr.data_end))
                     if producer_end_dates:
                         # Producer is planned → this WO is previzionat (starts after producer finishes)
                         semi_end_date = max(producer_end_dates).date()
@@ -506,7 +515,7 @@ def run_planning(
                     dispatch_id=disp.id,
                     wo=fr.wo, op=fr.op, cl=fr.cl,
                     resursa_id=fr.resursa_id, resursa_nume=fr.resursa_nume,
-                    data_start=fr.data_start, data_end=fr.data_end,
+                    data_start=_localize(fr.data_start), data_end=_localize(fr.data_end),
                     durata_ore=fr.durata_ore,
                     frozen=True, status=fr.status, motiv=None,
                 ))
@@ -516,7 +525,7 @@ def run_planning(
                     frozen_status = "previzionat_bt"
                 stats[frozen_status] = stats.get(frozen_status, 0) + 1
                 frozen_rank = get_rank(disp)
-                update_rank(frozen_rank, frozen_status, fr.data_end if fr.data_end else None)
+                update_rank(frozen_rank, frozen_status, _localize(fr.data_end) if fr.data_end else None)
                 continue
 
             remaining = calc_remaining_time(disp)

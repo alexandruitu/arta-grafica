@@ -983,7 +983,7 @@ def set_start(result_id: int, body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Rezultat planificare negasit")
     data_start_str = body.get("data_start", "")
     try:
-        new_start = datetime.strptime(data_start_str, "%Y-%m-%d %H:%M")
+        new_start = datetime.strptime(data_start_str, "%Y-%m-%d %H:%M").replace(tzinfo=TZ_RO)
     except ValueError:
         raise HTTPException(status_code=400, detail="Format invalid. Foloseste: YYYY-MM-DD HH:MM")
     r.data_start = new_start
