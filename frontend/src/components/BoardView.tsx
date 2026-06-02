@@ -95,9 +95,14 @@ export default function BoardView() {
     allGroups.forEach(g => {
       if (!g.isParent && activeResIds.has(g.id)) activeCLKeys.add(`cl__${g.cl}`);
     });
-    return allGroups.filter(g =>
-      g.isParent ? activeCLKeys.has(g.id) : activeResIds.has(g.id)
-    );
+    return allGroups
+      .filter(g => g.isParent ? activeCLKeys.has(g.id) : activeResIds.has(g.id))
+      .map(g => {
+        if (!g.isParent) return g;
+        // Restrict nestedGroups to only active resource IDs — eliminates empty rows
+        const activeNested = (g.nestedGroups || []).filter((id: string) => activeResIds.has(id));
+        return { ...g, nestedGroups: activeNested };
+      });
   }, [allGroups, filteredItems]);
 
   // Keep refs in sync
