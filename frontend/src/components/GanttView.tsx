@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 // @ts-ignore – frappe-gantt has no type declarations
 import Gantt from 'frappe-gantt';
 import { api } from '../api/client';
@@ -48,17 +48,44 @@ const STATUS_LABEL: Record<string, string> = {
   blocked_by_rank:          'Blocat (rank)',
 };
 
+const PREVIZIONAT_STATUSES = new Set([
+  'previzionat', 'previzionat_bt', 'previzionat_material', 'previzionat_semifabricat',
+]);
+
+function taskPlanStadiu(t: GanttTask): 'planificat' | 'previzionat' | 'other' {
+  if (t.status === 'planned') return 'planificat';
+  if (PREVIZIONAT_STATUSES.has(t.status)) return 'previzionat';
+  return 'other';
+}
+
+function taskIsLate(t: GanttTask): boolean {
+  return t.custom_class.includes('late');
+}
+
 export default function GanttView() {
   const wrapperRef   = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const ganttRef     = useRef<any>(null);
 
   const [tasks,       setTasks]       = useState<GanttTask[]>([]);
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if (planFilter === 'planificat'  && taskPlanStadiu(t) !== 'planificat')  return false;
+      if (planFilter === 'previzionat' && taskPlanStadiu(t) !== 'previzionat') return false;
+      if (lateFilter === 'late'   && !taskIsLate(t))  return false;
+      if (lateFilter === 'ontime' &&  taskIsLate(t))  return false;
+      return true;
+    });
+  }, [tasks, planFilter, lateFilter]);
+
   const [centreLucru, setCentreLucru] = useState<any[]>([]);
   const [selectedCL,  setSelectedCL]  = useState('');
   const [search,      setSearch]      = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [viewMode,    setViewMode]    = useState('Day');
+  const [planFilter,  setPlanFilter]  = useState<'all' | 'planificat' | 'previzionat'>('all');
+  const [lateFilter,  setLateFilter]  = useState<'all' | 'late' | 'ontime'>('all');
   const [loading,     setLoading]     = useState(false);
 
   // Sidebar – selected operation
@@ -127,12 +154,12 @@ export default function GanttView() {
 
   // Build and render Gantt chart
   useEffect(() => {
-    if (!containerRef.current || !wrapperRef.current || tasks.length === 0) return;
+    if (!containerRef.current || !wrapperRef.current || filteredTasks.length === 0) return;
     containerRef.current.innerHTML = '';
 
     // Use real times — no visual inflation, so dependency arrows render correctly (FS).
     // Short ops (< 1h) get a minimum of 1h so bars remain clickable.
-    const ganttTasks = tasks.map(t => {
+    const ganttTasks = filteredTasks.map(t => {
       const startMs  = new Date(t.start.replace(' ', 'T')).getTime();
       const endMs    = new Date((t.end || t.start).replace(' ', 'T')).getTime();
       const minEndMs = startMs + 1 * 3600 * 1000; // 1h minimum so bar is clickable
@@ -154,7 +181,7 @@ export default function GanttView() {
         bar_corner_radius: 3,
         padding: 14,
         on_click: async (task: any) => {
-          const t = tasks.find(x => x.id === task.id);
+          const t = filteredTasks.find(x => x.id === task.id);
           if (!t) return;
           const isFrozen = t.custom_class.startsWith('bar-frozen');
           setSelected({
@@ -198,7 +225,7 @@ export default function GanttView() {
         if (firstBar) wrapper.scrollLeft = Math.max(0, parseFloat(firstBar.getAttribute('x') || '0') - 100);
       }, 300);
     } catch (e) { console.error('Gantt render error:', e); }
-  }, [tasks, viewMode]);
+  }, [filteredTasks, viewMode]);
 
   // --- Actions ---
   const handleSetStart = async () => {
@@ -302,6 +329,42 @@ export default function GanttView() {
             className="p-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
             <ChevronRight size={15} />
           </button>
+        </div>
+
+        {/* ── Filtre 3 nivele ── */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-slate-500 font-medium">Plan:</span>
+          {(['all', 'planificat', 'previzionat'] as const).map(v => (
+            <button key={v} onClick={() => setPlanFilter(v)}
+              className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                planFilter === v
+                  ? v === 'planificat'  ? 'bg-green-100 border-green-400 text-green-700 font-medium'
+                  : v === 'previzionat' ? 'bg-blue-100 border-blue-400 text-blue-700 font-medium'
+                  : 'bg-slate-200 border-slate-400 text-slate-700 font-medium'
+                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}>
+              {v === 'all' ? 'Toate' : v === 'planificat' ? 'Planificat' : 'Previzionat'}
+            </button>
+          ))}
+          <span className="text-slate-300 mx-1">|</span>
+          <span className="text-xs text-slate-500 font-medium">Livrare:</span>
+          {(['all', 'ontime', 'late'] as const).map(v => (
+            <button key={v} onClick={() => setLateFilter(v)}
+              className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                lateFilter === v
+                  ? v === 'late'   ? 'bg-red-100 border-red-400 text-red-700 font-medium'
+                  : v === 'ontime' ? 'bg-green-100 border-green-400 text-green-700 font-medium'
+                  : 'bg-slate-200 border-slate-400 text-slate-700 font-medium'
+                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}>
+              {v === 'all' ? 'Toate' : v === 'ontime' ? 'La timp' : 'Întârziat'}
+            </button>
+          ))}
+          {(planFilter !== 'all' || lateFilter !== 'all') && (
+            <span className="text-xs text-slate-400 ml-1">
+              {filteredTasks.length}/{tasks.length} op.
+            </span>
+          )}
         </div>
 
         <button onClick={loadGantt}
