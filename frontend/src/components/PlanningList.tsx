@@ -140,19 +140,19 @@ export default function PlanningList() {
     });
   }, [allResults, selectedStatus, selectedResursa, search]);
 
-  // ── Stats computed from filtered results (2.5) ─────────────────────────────
+  // ── Stats computed from ALL results for current CL — stable under status/resource/search filters
   const stats = useMemo(() => {
-    const planned     = filteredResults.filter(r => r.status === 'planned').length;
-    const previzionat = filteredResults.filter(r => PREVIZIONAT_SET.has(r.status)).length;
-    const no_material = filteredResults.filter(r => r.status === 'no_material').length;
-    const no_bt       = filteredResults.filter(r => r.status === 'no_bt').length;
-    const blocked     = filteredResults.filter(r => r.status === 'blocked_by_rank').length;
-    const no_resource = filteredResults.filter(r => r.status === 'no_resource').length;
-    const ore         = filteredResults
+    const planned     = allResults.filter(r => r.status === 'planned').length;
+    const previzionat = allResults.filter(r => PREVIZIONAT_SET.has(r.status)).length;
+    const no_material = allResults.filter(r => r.status === 'no_material').length;
+    const no_bt       = allResults.filter(r => r.status === 'no_bt').length;
+    const blocked     = allResults.filter(r => r.status === 'blocked_by_rank').length;
+    const no_resource = allResults.filter(r => r.status === 'no_resource').length;
+    const ore         = allResults
       .filter(r => PLACED_SET.has(r.status))
       .reduce((s, r) => s + (r.durata_ore || 0), 0);
-    return { total: filteredResults.length, planned, previzionat, no_material, no_bt, blocked, no_resource, ore };
-  }, [filteredResults]);
+    return { total: allResults.length, planned, previzionat, no_material, no_bt, blocked, no_resource, ore };
+  }, [allResults]);
 
   const handleToggleFrozen = async (id: number, currentFrozen: boolean) => {
     try {
@@ -300,8 +300,8 @@ export default function PlanningList() {
       {loading && <p className="text-slate-500 text-sm">Se încarcă…</p>}
 
       {/* ── Table ── */}
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-lg shadow-sm">
+        <div className="overflow-x-auto rounded-lg">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
