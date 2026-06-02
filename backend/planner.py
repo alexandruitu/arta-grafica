@@ -17,7 +17,10 @@ Flow:
 6. Time = P_Setup + P_Runtime - R_Runtime
 """
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from collections import defaultdict
+
+TZ_RO = ZoneInfo("Europe/Bucharest")
 from sqlalchemy.orm import Session
 from models import (
     Comanda, DispatchItem, Operatie, Deficit, Resursa, ProgramResursa,
@@ -125,6 +128,7 @@ def find_slot_precise(
             slot_start = datetime(
                 check_date.year, check_date.month, check_date.day,
                 start_hour, start_minute,
+                tzinfo=TZ_RO,
             )
 
         if hours_available >= hours_remaining:
@@ -137,6 +141,7 @@ def find_slot_precise(
             slot_end = datetime(
                 check_date.year, check_date.month, check_date.day,
                 end_hour, end_minute,
+                tzinfo=TZ_RO,
             )
             hours_remaining = 0.0
             break
@@ -145,6 +150,7 @@ def find_slot_precise(
             slot_end = datetime(
                 check_date.year, check_date.month, check_date.day,
                 SHIFT_END_H, 0,
+                tzinfo=TZ_RO,
             )
 
     if hours_remaining <= 0.0 and slot_start is not None and slot_end is not None:
@@ -165,7 +171,7 @@ def run_planning(
     ignore_rank:     skip rank dependency checks (plan operations out of rank order)
     """
     sesiune = PlanificareSesiune(
-        created_at=datetime.now(),
+        created_at=datetime.now(TZ_RO),
         status="running",
     )
     db.add(sesiune)
@@ -342,17 +348,16 @@ def run_planning(
     }
     # Use current datetime as planning start — operations won't be scheduled in the past.
     # Clamp to shift hours: before shift → use shift start; after shift → next day shift start.
-    now = datetime.now()
+    now = datetime.now(TZ_RO)
     today = now.date()
-    shift_start_today = datetime(today.year, today.month, today.day, SHIFT_START_H)
-    shift_end_today   = datetime(today.year, today.month, today.day, SHIFT_END_H)
+    shift_start_today = datetime(today.year, today.month, today.day, SHIFT_START_H, tzinfo=TZ_RO)
+    shift_end_today   = datetime(today.year, today.month, today.day, SHIFT_END_H,   tzinfo=TZ_RO)
     if now < shift_start_today:
         today_dt = shift_start_today
     elif now >= shift_end_today:
         next_day = today + timedelta(days=1)
-        today_dt = datetime(next_day.year, next_day.month, next_day.day, SHIFT_START_H)
+        today_dt = datetime(next_day.year, next_day.month, next_day.day, SHIFT_START_H, tzinfo=TZ_RO)
     else:
-        # Truncate to minutes for clean slot start
         today_dt = now.replace(second=0, microsecond=0)
 
     for comanda in comenzi:
@@ -548,6 +553,7 @@ def run_planning(
                 previz_dt = datetime(
                     wo_previzionat_start.year, wo_previzionat_start.month,
                     wo_previzionat_start.day, SHIFT_START_H,
+                    tzinfo=TZ_RO,
                 )
                 earliest_start = max(earliest_start, previz_dt)
             for prev_rank, prev_status in rank_status.items():

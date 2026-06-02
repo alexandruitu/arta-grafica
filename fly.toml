@@ -4,6 +4,7 @@ primary_region = "lhr"
 [env]
   DATA_DIR = "/data"
   PORT     = "8080"
+  TZ       = "Europe/Bucharest"
 
 [http_service]
   auto_start_machines  = true

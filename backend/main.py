@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+TZ_RO = ZoneInfo("Europe/Bucharest")
 from collections import defaultdict
 import hashlib as _hashlib
 import threading as _threading
