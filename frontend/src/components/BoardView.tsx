@@ -39,7 +39,9 @@ export default function BoardView() {
   // Filters
   const [selectedCL,   setSelectedCL]   = useState('');
   const [search,       setSearch]       = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'late' | 'ontime'>('all');
+  const [planFilter,   setPlanFilter]   = useState<'all' | 'planificat' | 'previzionat'>('all');
+  const [lateFilter,   setLateFilter]   = useState<'all' | 'late' | 'ontime'>('all');
+  const [freezeFilter, setFreezeFilter] = useState<'all' | 'frozen' | 'unfrozen'>('all');
 
   // Sidebar
   const [selectedOp,  setSelectedOp]  = useState<SelectedOp | null>(null);
@@ -73,12 +75,20 @@ export default function BoardView() {
   };
 
   // ── Filtering (client-side) ─────────────────────────────────────────────────
+  const PREV_BOARD_STATUSES = new Set([
+    'previzionat', 'previzionat_bt', 'previzionat_material', 'previzionat_semifabricat',
+  ]);
+
   const filteredItems = useMemo(() => {
     const s = search.toLowerCase().trim();
     return allItems.filter(item => {
       if (selectedCL && item.cl !== selectedCL) return false;
-      if (statusFilter === 'late'   && !item.late) return false;
-      if (statusFilter === 'ontime' &&  item.late) return false;
+      if (planFilter === 'planificat'  && item.status !== 'planned')              return false;
+      if (planFilter === 'previzionat' && !PREV_BOARD_STATUSES.has(item.status))  return false;
+      if (lateFilter === 'late'   && !item.late) return false;
+      if (lateFilter === 'ontime' &&  item.late) return false;
+      if (freezeFilter === 'frozen'   && !item.frozen) return false;
+      if (freezeFilter === 'unfrozen' &&  item.frozen) return false;
       if (s) {
         const woMatch     = String(item.wo).includes(s);
         const clientMatch = (item.client  || '').toLowerCase().includes(s);
@@ -87,7 +97,7 @@ export default function BoardView() {
       }
       return true;
     });
-  }, [allItems, selectedCL, search, statusFilter]);
+  }, [allItems, selectedCL, planFilter, lateFilter, freezeFilter, search]);
 
   const filteredGroups = useMemo(() => {
     const activeResIds = new Set(filteredItems.map(i => i.group));
@@ -280,13 +290,56 @@ export default function BoardView() {
           placeholder="Caută WO, client, articol…"
           className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-52" />
 
-        {/* Status filter */}
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}
-          className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
-          <option value="all">Toate comenzile</option>
-          <option value="late">Întârziate</option>
-          <option value="ontime">Neîntârziate</option>
-        </select>
+        {/* ── Filtre 3 nivele ── */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Stadiu planificare */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-500 font-medium">Plan:</span>
+            {(['all', 'planificat', 'previzionat'] as const).map(v => (
+              <button key={v} onClick={() => setPlanFilter(v)}
+                className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                  planFilter === v
+                    ? v === 'planificat'  ? 'bg-green-100 border-green-400 text-green-700 font-medium'
+                    : v === 'previzionat' ? 'bg-blue-100 border-blue-400 text-blue-700 font-medium'
+                    : 'bg-slate-200 border-slate-400 text-slate-700 font-medium'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}>
+                {v === 'all' ? 'Toate' : v === 'planificat' ? 'Planificat' : 'Previzionat'}
+              </button>
+            ))}
+          </div>
+          {/* Stadiu livrare */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-500 font-medium">Livrare:</span>
+            {(['all', 'ontime', 'late'] as const).map(v => (
+              <button key={v} onClick={() => setLateFilter(v)}
+                className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                  lateFilter === v
+                    ? v === 'late'   ? 'bg-red-100 border-red-400 text-red-700 font-medium'
+                    : v === 'ontime' ? 'bg-green-100 border-green-400 text-green-700 font-medium'
+                    : 'bg-slate-200 border-slate-400 text-slate-700 font-medium'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}>
+                {v === 'all' ? 'Toate' : v === 'ontime' ? 'La timp' : 'Întârziat'}
+              </button>
+            ))}
+          </div>
+          {/* Stadiu Freeze */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-500 font-medium">Freeze:</span>
+            {(['all', 'unfrozen', 'frozen'] as const).map(v => (
+              <button key={v} onClick={() => setFreezeFilter(v)}
+                className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                  freezeFilter === v
+                    ? v === 'frozen'   ? 'bg-purple-100 border-purple-400 text-purple-700 font-medium'
+                    : 'bg-slate-200 border-slate-400 text-slate-700 font-medium'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                }`}>
+                {v === 'all' ? 'Toate' : v === 'frozen' ? '❄ Frozen' : 'Unfrozen'}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Actions */}
         <button onClick={loadBoard}
