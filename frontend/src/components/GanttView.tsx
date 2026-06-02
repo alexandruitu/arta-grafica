@@ -68,6 +68,8 @@ export default function GanttView() {
   const ganttRef     = useRef<any>(null);
 
   const [tasks,       setTasks]       = useState<GanttTask[]>([]);
+  const [planFilter,  setPlanFilter]  = useState<'all' | 'planificat' | 'previzionat'>('all');
+  const [lateFilter,  setLateFilter]  = useState<'all' | 'late' | 'ontime'>('all');
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
@@ -84,8 +86,6 @@ export default function GanttView() {
   const [search,      setSearch]      = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [viewMode,    setViewMode]    = useState('Day');
-  const [planFilter,  setPlanFilter]  = useState<'all' | 'planificat' | 'previzionat'>('all');
-  const [lateFilter,  setLateFilter]  = useState<'all' | 'late' | 'ontime'>('all');
   const [loading,     setLoading]     = useState(false);
 
   // Sidebar – selected operation
