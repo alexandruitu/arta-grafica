@@ -5,12 +5,13 @@ import BoardView from './components/BoardView';
 import ComenziList from './components/ComenziList';
 import PlanningList from './components/PlanningList';
 import StocView from './components/StocView';
+import SetariView from './components/SetariView';
 import LoginPage from './components/LoginPage';
-import { LayoutDashboard, GanttChart, LayoutGrid, Package, ListChecks, Boxes, LogOut } from 'lucide-react';
+import { LayoutDashboard, GanttChart, LayoutGrid, Package, ListChecks, Boxes, Settings, LogOut } from 'lucide-react';
 import { getToken, clearToken } from './api/client';
 import './index.css';
 
-type Tab = 'dashboard' | 'gantt' | 'board' | 'comenzi' | 'planificare' | 'stoc';
+type Tab = 'dashboard' | 'gantt' | 'board' | 'comenzi' | 'planificare' | 'stoc' | 'setari';
 
 const tabs: { id: Tab; label: string; icon: any }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -19,6 +20,7 @@ const tabs: { id: Tab; label: string; icon: any }[] = [
   { id: 'comenzi', label: 'Comenzi', icon: Package },
   { id: 'planificare', label: 'Planificare', icon: ListChecks },
   { id: 'stoc', label: 'Stoc Materiale', icon: Boxes },
+  { id: 'setari', label: 'Setări', icon: Settings },
 ];
 
 export default function App() {
@@ -93,6 +95,7 @@ export default function App() {
           {activeTab === 'comenzi' && <ComenziList />}
           {activeTab === 'planificare' && <PlanningList />}
           {activeTab === 'stoc' && <StocView />}
+          {activeTab === 'setari' && <SetariView />}
         </main>
       </div>
     </div>

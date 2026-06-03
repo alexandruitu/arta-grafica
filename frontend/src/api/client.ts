@@ -142,4 +142,12 @@ export const api = {
     const qs = search ? `?search=${search}` : '';
     return request<any[]>(`/stoc${qs}`);
   },
+
+  // Setari
+  getSetari: () => request<Record<string, string>>('/setari'),
+  updateSetari: (body: Record<string, string>) =>
+    request<Record<string, string>>('/setari', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };
