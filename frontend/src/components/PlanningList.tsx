@@ -25,6 +25,7 @@ const STATUS_LABEL: Record<string, string> = {
   no_bt:                    'Fără BT',
   blocat_semifabricat:      'Blocat Semifabricat',
   blocat_prefabricat:       'Blocat Prefabricat',  // backward compat
+  no_bt_no_material:        'Blocat (fara BT + material)',
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -38,6 +39,7 @@ const STATUS_STYLE: Record<string, string> = {
   no_bt:                    'bg-orange-100 text-orange-700',
   blocat_semifabricat:      'bg-fuchsia-100 text-fuchsia-700',
   blocat_prefabricat:       'bg-fuchsia-100 text-fuchsia-700',
+  no_bt_no_material:        'bg-rose-100 text-rose-800',
 };
 
 const PREVIZIONAT_SET = new Set([

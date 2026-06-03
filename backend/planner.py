@@ -171,6 +171,7 @@ def run_planning(
     db: Session,
     ignore_material: bool = False,
     ignore_rank: bool = False,
+    material_threshold: float = 0.01,
 ) -> dict:
     """Execute the planning algorithm.
 
@@ -223,7 +224,7 @@ def run_planning(
     def wo_has_material(cp: int) -> bool:
         """True if current stock covers ALL non-trivial reservations for this WO."""
         for art, needed in _wo_mat_snap.get(str(cp), []):
-            if needed <= 0.01:
+            if needed <= material_threshold:
                 continue  # negligible consumption — ignore
             if art and art.startswith("MS"):
                 continue  # MS-prefixed materials are excluded from planning checks
@@ -353,6 +354,7 @@ def run_planning(
         "no_resource": 0,
         "blocked_by_rank": 0,
         "no_bt": 0,
+        "no_bt_no_material": 0,
         "completed": 0,
     }
     # Use current datetime as planning start — operations won't be scheduled in the past.
@@ -391,8 +393,11 @@ def run_planning(
         materiale = wo_materiale.get(wo_str, [])
         material_lipsit = None
         for art, cantitate in materiale:
-            if cantitate <= 0.01:
-                continue  # negligible consumption — skip material check
+            cant_vnz = comanda.cant_vnz or 1
+            if material_threshold > 0 and (cantitate / cant_vnz) <= material_threshold:
+                continue  # negligible per unit — skip
+            if material_threshold == 0 and cantitate <= 0:
+                continue  # threshold=0: only skip truly zero quantities
             if art and art.startswith("MS"):
                 continue  # MS-prefixed materials excluded from planning checks
             available = stoc_tracker.get(art, 0.0)
@@ -400,24 +405,29 @@ def run_planning(
                 material_lipsit = (art, available, cantitate)
                 break
 
-        # ── Determine WO-level planning mode ─────────────────────────────────
+        # ── Determine WO-level planning mode ─────────────────────────────────────
         wo_block: tuple[str, str] | None = None
         wo_previzionat_start: date | None = None
-        # Tracks WHY this WO is previzionat — used for status sub-type
-        wo_previzionat_reason: str = ""   # "bt" | "material" | "bt+material"
+        wo_previzionat_reason: str = ""
 
         stadiu_priority_val = get_stadiu_priority(comanda.stadiu_prepress)
 
-        # BT check: skip for high-stadiu orders (≥ 50) — BT already exists or not needed.
-        # "05 - BT existent" (50), "06 - In productie" (100), "00 - N/A" (100) are all exempt.
+        # ── BT check (independent of material check) ─────────────────────────────
+        bt_block: tuple[str, str] | None = None
+        bt_previzionat: tuple[date, str] | None = None
+
         if stadiu_priority_val < 50 and not has_valid_bt(comanda):
             if comanda.data_limita_bt:
-                wo_previzionat_start = comanda.data_limita_bt
-                wo_previzionat_reason = "bt"
+                bt_previzionat = (comanda.data_limita_bt, "bt")
             else:
-                wo_block = ("no_bt", "Comanda nu are Bun de Tipar valid si nu are data limita BT")
+                bt_block = ("no_bt", "Comanda nu are Bun de Tipar valid si nu are data limita BT")
 
-        if wo_block is None and material_lipsit and not ignore_material:
+        # ── Material check (always run, even if BT already blocks) ───────────────
+        mat_block: tuple[str, str] | None = None
+        mat_previzionat_date: date | None = None
+        mat_previzionat_reason: str = ""
+
+        if material_lipsit and not ignore_material:
             art, available, cantitate_needed = material_lipsit
             deficit_qty = cantitate_needed - available
             mat_date = None
@@ -428,40 +438,52 @@ def run_planning(
                     mat_date = arr_date
                     break
             if mat_date is None:
-                # Check if the missing article is a prefabricat (produced by another WO)
                 producer_wos = prefabricat_map.get(art, [])
                 if producer_wos:
                     wos_str = ",".join(str(w) for w in producer_wos)
-                    # Check if any producer WO has a planned end date in this session
                     producer_end_dates = [_localize(wo_last_end[pwo]) for pwo in producer_wos if pwo in wo_last_end]
                     for (fw, _fp), fr in frozen_ops.items():
                         if fw in producer_wos and fr.data_end:
                             producer_end_dates.append(_localize(fr.data_end))
                     if producer_end_dates:
-                        # Producer is planned → this WO is previzionat (starts after producer finishes)
                         semi_end_date = max(producer_end_dates).date()
-                        wo_previzionat_start = max(wo_previzionat_start, semi_end_date) if wo_previzionat_start else semi_end_date
-                        wo_previzionat_reason = (
-                            wo_previzionat_reason + "+semifabricat" if wo_previzionat_reason else "semifabricat"
-                        )
+                        mat_previzionat_date = semi_end_date
+                        mat_previzionat_reason = "semifabricat"
                     else:
-                        # Producer not yet planned → hard block
-                        wo_block = (
-                            "blocat_semifabricat",
-                            f"prefabricat:{wos_str}:{art}",
-                        )
+                        mat_block = ("blocat_semifabricat", f"prefabricat:{wos_str}:{art}")
                 else:
-                    wo_block = (
+                    mat_block = (
                         "no_material",
                         f"Stoc insuficient {art}: disponibil={available:.0f}, necesar={cantitate_needed:.0f}, aprovizionare insuficienta",
                     )
             else:
-                new_start = mat_date
-                wo_previzionat_start = max(wo_previzionat_start, new_start) if wo_previzionat_start else new_start
-                # Mark material as previzionat reason (may combine with BT reason)
-                wo_previzionat_reason = (
-                    "bt+material" if wo_previzionat_reason == "bt" else "material"
-                )
+                mat_previzionat_date = mat_date
+                mat_previzionat_reason = "material"
+
+        # ── Combine BT + material results ────────────────────────────────────────
+        if bt_block and mat_block:
+            combined_motiv = bt_block[1] + " | " + mat_block[1]
+            wo_block = ("no_bt_no_material", combined_motiv)
+        elif bt_block:
+            extra = ""
+            if mat_block:
+                extra = " | " + mat_block[1]
+            elif mat_previzionat_date:
+                extra = f" | Material previzionat: {mat_previzionat_date}"
+            wo_block = (bt_block[0], bt_block[1] + extra)
+        elif mat_block:
+            extra = ""
+            if bt_previzionat:
+                extra = f" | BT previzionat: {bt_previzionat[0]}"
+            wo_block = (mat_block[0], mat_block[1] + extra)
+        else:
+            # No hard block — accumulate previzionat dates/reasons
+            if bt_previzionat:
+                wo_previzionat_start = bt_previzionat[0]
+                wo_previzionat_reason = bt_previzionat[1]
+            if mat_previzionat_date:
+                wo_previzionat_start = max(wo_previzionat_start, mat_previzionat_date) if wo_previzionat_start else mat_previzionat_date
+                wo_previzionat_reason = (wo_previzionat_reason + "+" + mat_previzionat_reason if wo_previzionat_reason else mat_previzionat_reason)
 
         # Reserve materials if WO is not hard-blocked.
         # Previzionat WOs (material arriving later / semifabricat in production) are

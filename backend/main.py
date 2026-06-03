@@ -167,10 +167,13 @@ def do_plan(
             detail="O planificare este deja in curs. Asteptati finalizarea ei.",
         )
     try:
+        threshold_row = db.query(Setari).filter(Setari.cheie == "material_threshold").first()
+        material_threshold = float(threshold_row.valoare) if threshold_row and threshold_row.valoare else 0.01
         result = run_planning(
             db,
             ignore_material=body.ignore_material,
             ignore_rank=body.ignore_rank,
+            material_threshold=material_threshold,
         )
     finally:
         _PLAN_LOCK.release()
@@ -586,6 +589,7 @@ def export_planning_xlsx(
         "previzionat_semifabricat": "Previzionat (semifabricat în producție)",
         "no_material":              "Fără Material",
         "no_bt":                    "Fără BT",
+        "no_bt_no_material":        "Blocat (fara BT + fara material)",
         "blocked_by_rank":          "Blocat Rank",
         "no_resource":              "Fără Resursă",
         "blocat_semifabricat":      "Blocat – semifabricat neplanificat",
@@ -766,6 +770,7 @@ def get_board_data(db: Session = Depends(get_db)):
         "previzionat_material":       "Previzionat (fără material)",
         "previzionat_semifabricat":   "Previzionat (semifabricat în producție)",
         "no_bt":                      "Blocat – fără BT",
+        "no_bt_no_material":          "Blocat – fara BT si fara material",
         "no_material":                "Blocat – fără material",
         "no_resource":                "Blocat – fără resursă",
         "blocked_by_rank":            "Blocat – rank",
