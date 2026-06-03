@@ -154,3 +154,12 @@ class PlanificareRezultat(Base):
     sesiune = relationship("PlanificareSesiune")
     dispatch = relationship("DispatchItem")
     resursa_rel = relationship("Resursa")
+
+
+class Setari(Base):
+    """Key-value application settings."""
+    __tablename__ = "setari"
+
+    id      = Column(Integer, primary_key=True, autoincrement=True)
+    cheie   = Column(String, unique=True, index=True, nullable=False)
+    valoare = Column(String, nullable=True)

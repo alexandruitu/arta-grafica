@@ -21,16 +21,30 @@ from sqlalchemy import func, case as _case
 from database import engine, get_db, Base
 from models import (
     Comanda, DispatchItem, Operatie, Deficit, Resursa, ProgramResursa,
-    PlanificareSesiune, PlanificareRezultat,
+    PlanificareSesiune, PlanificareRezultat, Setari,
 )
 from schemas import (
     ComandaOut, DispatchOut, PlanificareOut, GanttTask,
-    ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary, FrozenBody,
+    ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary, FrozenBody, SetareItem,
 )
 from importer import import_all
 from planner import run_planning
 
 Base.metadata.create_all(bind=engine)
+
+def _seed_setari(db_session):
+    """Ensure default settings exist. Safe to call on every startup."""
+    DEFAULTS = {
+        "material_threshold": "0.01",
+    }
+    for cheie, valoare in DEFAULTS.items():
+        if not db_session.query(Setari).filter(Setari.cheie == cheie).first():
+            db_session.add(Setari(cheie=cheie, valoare=valoare))
+    db_session.commit()
+
+from database import SessionLocal as _SessionLocal
+with _SessionLocal() as _sess:
+    _seed_setari(_sess)
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 _AUTH_USER = os.environ.get("AG_USER", "andrei")
@@ -93,6 +107,28 @@ _EXPECTED_FILES = {
     "Lista Deficite_AS.xlsx",
     "Resurse_AS.xlsx",
 }
+
+
+# --- Setari ---
+@app.get("/api/setari")
+def get_setari(db: Session = Depends(get_db)):
+    """Return all settings as {cheie: valoare} dict."""
+    rows = db.query(Setari).all()
+    return {r.cheie: r.valoare for r in rows}
+
+
+@app.put("/api/setari")
+def update_setari(body: dict = Body(...), db: Session = Depends(get_db)):
+    """Upsert settings. Body: {cheie: valoare, ...}"""
+    for cheie, valoare in body.items():
+        row = db.query(Setari).filter(Setari.cheie == cheie).first()
+        if row:
+            row.valoare = str(valoare) if valoare is not None else None
+        else:
+            db.add(Setari(cheie=cheie, valoare=str(valoare) if valoare is not None else None))
+    db.commit()
+    rows = db.query(Setari).all()
+    return {r.cheie: r.valoare for r in rows}
 
 
 # --- Import ---

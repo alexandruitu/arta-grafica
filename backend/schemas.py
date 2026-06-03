@@ -127,3 +127,11 @@ class ComandaSummary(BaseModel):
 
 class FrozenBody(BaseModel):
     frozen: bool
+
+
+class SetareItem(BaseModel):
+    cheie: str
+    valoare: Optional[str] = None
+
+    class Config:
+        from_attributes = True
