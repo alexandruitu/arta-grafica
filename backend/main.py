@@ -28,7 +28,7 @@ from schemas import (
     ResursaOut, ImportResult, PlanningResult, StocArticol, ComandaSummary, FrozenBody, SetareItem,
 )
 from importer import import_all
-from planner import run_planning
+from planner import run_planning, has_valid_bt, get_stadiu_priority
 
 Base.metadata.create_all(bind=engine)
 
@@ -725,6 +725,58 @@ def get_board_data(db: Session = Depends(get_db)):
         if r.wo not in comanda_cache:
             comanda_cache[r.wo] = db.query(Comanda).filter(Comanda.cp == r.wo).first()
 
+    # ── Frozen-posibil check — based on current BT + material conditions ─────
+    frozen_wos = {r.wo for r in results if r.frozen}
+    frozen_possible: dict[int, bool] = {}
+
+    if frozen_wos:
+        # Read threshold from settings
+        threshold_row = db.query(Setari).filter(Setari.cheie == "material_threshold").first()
+        mat_threshold = float(threshold_row.valoare) if threshold_row and threshold_row.valoare else 0.01
+
+        # stoc_snap[articol] = sold_actual (first Deficit row per article)
+        stoc_snap: dict[str, float] = {}
+        for d in db.query(Deficit).all():
+            if d.articol and d.articol not in stoc_snap:
+                stoc_snap[d.articol] = d.sold_actual or 0.0
+
+        # wo_reservations[str(wo)] = [(articol, abs_cantitate), ...]
+        wo_reservations: dict[str, list] = defaultdict(list)
+        for d in db.query(Deficit).filter(
+            Deficit.tip_rezervare == "B",
+            Deficit.pe_comanda.in_(list(frozen_wos)),
+        ).all():
+            if d.articol and d.pe_comanda:
+                wo_reservations[str(d.pe_comanda)].append(
+                    (d.articol, abs(d.cantitate or 0.0))
+                )
+
+        for wo in frozen_wos:
+            comanda = comanda_cache.get(wo)
+            if not comanda:
+                frozen_possible[wo] = False
+                continue
+
+            # BT check
+            bt_ok = (
+                get_stadiu_priority(comanda.stadiu_prepress) >= 50
+                or has_valid_bt(comanda)
+            )
+
+            # Material check (per-unit threshold)
+            cant_vnz = comanda.cant_vnz or 1
+            mat_ok = True
+            for art, qty in wo_reservations.get(str(wo), []):
+                if art.startswith("MS"):
+                    continue
+                if mat_threshold > 0 and (qty / cant_vnz) <= mat_threshold:
+                    continue
+                if stoc_snap.get(art, 0.0) < qty:
+                    mat_ok = False
+                    break
+
+            frozen_possible[wo] = bt_ok and mat_ok
+
     # Resources used in this session
     resurse_ids = {r.resursa_id for r in results}
     resurse_map = {r.id: r for r in db.query(Resursa).filter(Resursa.id.in_(resurse_ids)).all()}
@@ -755,8 +807,8 @@ def get_board_data(db: Session = Depends(get_db)):
     # 5-color logic — status values match planner.py output exactly
     def item_color(op: PlanificareRezultat, is_late: bool) -> str:
         if op.frozen:
-            # portocaliu = frozen dar imposibil (fara material sau blocat de rank)
-            return "#ea580c" if op.status in ("no_material", "blocked_by_rank") else "#7c3aed"
+            possible = frozen_possible.get(op.wo, False)
+            return "#7c3aed" if possible else "#ea580c"  # violet=posibil, orange=imposibil
         if op.status in ("previzionat", "previzionat_bt", "previzionat_material", "previzionat_semifabricat"):
             return "#2563eb"   # albastru — previzionat (fara BT / material / semifabricat)
         if is_late:
@@ -823,6 +875,7 @@ def get_board_data(db: Session = Depends(get_db)):
             "durata_ore": op.durata_ore,
             "late": is_late,
             "frozen": op.frozen,
+            "frozen_possible": frozen_possible.get(op.wo, False) if op.frozen else None,
             "status": op.status or "",
             "client": comanda.client if comanda else "",
             "articol": comanda.articol if comanda else "",
