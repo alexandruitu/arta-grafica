@@ -33,13 +33,15 @@ from planner import run_planning
 Base.metadata.create_all(bind=engine)
 
 def _seed_setari(db_session):
-    """Ensure default settings exist. Safe to call on every startup."""
+    """Ensure default settings exist. Safe to call concurrently (upsert, no-op on conflict)."""
+    from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
     DEFAULTS = {
         "material_threshold": "0.01",
     }
     for cheie, valoare in DEFAULTS.items():
-        if not db_session.query(Setari).filter(Setari.cheie == cheie).first():
-            db_session.add(Setari(cheie=cheie, valoare=valoare))
+        stmt = _sqlite_insert(Setari).values(cheie=cheie, valoare=valoare)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["cheie"])
+        db_session.execute(stmt)
     db_session.commit()
 
 from database import SessionLocal as _SessionLocal
